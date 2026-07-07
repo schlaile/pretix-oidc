@@ -43,7 +43,11 @@ class OIDCAuthBackend(BaseAuthBackend):
             self.client.store_registration_info(client_reg)
             self.client.redirect_uris = [None]
 
-            self.scopes = config.get("oidc", "scopes", fallback="openid").split(",")
+            self.scopes = [
+                s.strip()
+                for s in config.get("oidc", "scopes", fallback="openid").split(",")
+                if s.strip()
+            ]
         except (NoSectionError, NoOptionError):
             logger.error(
                 "Please specify issuer, authorization_endpoint, token_endpoint, userinfo_endpoint, end_session_endpoint, jwks_uri, client_id and client_secret "
@@ -97,13 +101,13 @@ class OIDCAuthBackend(BaseAuthBackend):
         response_state = auth_response.get("state", None)
 
         if not oidc_state or not response_state:
-            return [None, None]
+            return [None, None, None]
 
         if response_state not in oidc_state:
-            return [None, None]
+            return [None, None, None]
 
         if oidc_state[response_state]["generated_on"] < time.time() - 5 * 60:
-            return [None, None]
+            return [None, None, None]
 
         request.session["oidc_next_url"] = oidc_state[response_state]["next"]
 
@@ -127,4 +131,4 @@ class OIDCAuthBackend(BaseAuthBackend):
             "auth_backend": self.identifier,
         }
 
-        return [user_data, id_token]
+        return [user_data, id_token, userinfo]

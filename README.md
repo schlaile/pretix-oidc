@@ -2,6 +2,8 @@
 
 This is a plugin for [pretix](https://github.com/pretix/pretix).
 
+Forked from [thegcat/pretix-oidc](https://github.com/thegcat/pretix-oidc)
+
 OIDC authentication plugin for pretix
 
 ## Installation
@@ -37,10 +39,10 @@ your `pretix.cfg`. Add the OIDC configuration to that same file in a new
     # what OIDC claim pretix should use to uniquely identify OIDC users
     # default: sub
     unique_attribute=
-    # set staff scope to an claim name (maybe you need to add it to scopes as well) and a value to test against to promote users as staff
+    # dot-path to a claim in the ID token for User.is_staff (legacy key: staff_scope; not an OAuth scope name)
     staff_claim=
+    # comma-separated values; user becomes staff if any claim value matches. omit staff_claim and staff_value to leave staff unchanged.
     staff_value=
-    # multiple staff_values can be provided, separated by commas. whitespaces are ignored.
     # staff_value=val_1,val_2
 
 The callback URI on your pretix will be `/oidc/callback/`, enter this at the

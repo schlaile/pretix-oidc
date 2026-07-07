@@ -4,3 +4,5 @@ recursive-include pretix_oidc/locale *
 include LICENSE
 include CHANGELOG.md
 exclude .gitlab-ci.yml
+recursive-exclude .forgejo *
+global-exclude .DS_Store

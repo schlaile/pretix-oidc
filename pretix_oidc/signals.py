@@ -18,8 +18,8 @@ def add_team_auto_assign_to_nav_pane(sender, request, **kwargs):
                 kwargs={"organizer": request.organizer.slug},
             ),
             "active": (
-                request.resolver_match.url_name.startswith("team_assignment_rules")
-            ),
+                getattr(request.resolver_match, "url_name", "") or ""
+            ).startswith("team_assignment_rules"),
             "icon": "group",
         },
     ]

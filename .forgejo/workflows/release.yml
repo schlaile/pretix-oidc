@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Release to Forgejo
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install plugin dependencies
+        run: pip3 install -Ue .
+      - name: Build package
+        run: python -m build
+      - name: Upload package to Forgejo Packages
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PACKAGE_TOKEN }}
+          TWINE_REPOSITORY_URL: https://git.binarycollective.de/api/packages/${{ github.repository_owner }}/pypi
+        run: twine upload dist/*
+      - name: Create Release
+        uses: https://gitea.com/actions/release-action@main
+        with:
+          files: dist/*
+          api_key: ${{ secrets.PACKAGE_TOKEN }}
+
+  pypi:
+    name: Release to PyPI
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Build package
+        run: python -m build
+      - name: Upload package to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload dist/*

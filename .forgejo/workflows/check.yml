@@ -1,0 +1,69 @@
+name: Code Style and Tests
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - 'pretix_oidc/locale/**'
+      - 'pretix_oidc/static/**'
+  pull_request:
+    branches: [ main, master ]
+    paths-ignore:
+      - 'pretix_oidc/locale/**'
+      - 'pretix_oidc/static/**'
+
+jobs:
+  isort:
+    name: isort
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install plugin dependencies
+        run: pip3 install -Ue .
+      - name: Run isort
+        run: isort -c .
+  flake:
+    name: flake8
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install plugin dependencies
+        run: pip3 install -Ue .
+      - name: Run flake8
+        run: flake8 .
+        working-directory: .
+  black:
+    name: black
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install plugin dependencies
+        run: pip3 install -Ue .
+      - name: Run black
+        run: black --check .
+        working-directory: .
+  packaging:
+    name: packaging
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install plugin dependencies
+        run: pip3 install -Ue .
+      - name: Run check-manifest
+        run: check-manifest .
+        working-directory: .
+      - name: Build package
+        run: python setup.py sdist
+        working-directory: .
+      - name: Check package
+        run: twine check dist/*
+        working-directory: .
+  test:
+    name: Tests
+    runs-on: binary-pretix
+    steps:
+      - uses: https://github.com/actions/checkout@v4
+      - name: Install plugin dependencies
+        run: pip3 install -Ue .
+      - name: Run checks
+        run: py.test tests
