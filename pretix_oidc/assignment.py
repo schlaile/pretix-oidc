@@ -10,6 +10,12 @@ def claims_dict(source):
         return {}
     if isinstance(source, dict):
         return source
+    to_dict = getattr(source, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except (TypeError, ValueError):
+            pass
     try:
         return dict(source)
     except (TypeError, ValueError):
@@ -23,11 +29,17 @@ def is_error_response(source):
 def pick_claim(sources, key, default=None):
     for source in sources:
         claims = claims_dict(source)
-        if not claims or claims.get("error"):
-            continue
-        value = claims.get(key)
-        if value is not None and value != "":
-            return value
+        if claims and not claims.get("error"):
+            value = claims.get(key)
+            if value is not None and value != "":
+                return value
+        if source is not None and hasattr(source, "__getitem__"):
+            try:
+                value = source[key]
+            except (KeyError, TypeError):
+                value = None
+            if value is not None and value != "":
+                return value
     return default
 
 

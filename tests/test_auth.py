@@ -103,6 +103,7 @@ def test_process_callback_falls_back_to_id_token_for_sub_email_name():
         "uuid": POCKETID_SUB,
         "email": POCKETID_EMAIL,
         "fullname": POCKETID_NAME,
+        "email_verified": None,
         "auth_backend": "pretix_oidc",
     }
     assert normalized_id_token["pretix_organizer"] == POCKETID_ORGANIZER
@@ -152,6 +153,16 @@ def test_process_callback_rejects_missing_uuid():
     assert backend.process_callback(request) == [None, None, None]
 
 
+def test_process_callback_extracts_email_verified():
+    id_token = _pocketid_id_token(email_verified=True)
+    userinfo = _pocketid_userinfo_no_sub(email_verified=True)
+
+    backend, request = _callback_backend(id_token, userinfo)
+    user_data, _, _ = backend.process_callback(request)
+
+    assert user_data["email_verified"] is True
+
+
 def test_process_callback_rejects_missing_id_token():
     backend, request = _callback_backend(
         _pocketid_id_token(),
@@ -159,3 +170,30 @@ def test_process_callback_rejects_missing_id_token():
         access_token_response={},
     )
     assert backend.process_callback(request) == [None, None, None]
+    assert request.session["oidc_callback_error"] == "missing_id_token"
+
+
+def test_authentication_url_keeps_existing_oidc_state():
+    with patch("pretix_oidc.auth.config", _mock_config()):
+        backend = OIDCAuthBackend()
+
+    backend.client = MagicMock()
+    backend.client.client_id = "client"
+    backend.client.authorization_endpoint = "https://idp.example/auth"
+    backend.client.construct_AuthorizationRequest.return_value = MagicMock(
+        request=MagicMock(return_value="https://idp.example/auth?state=new")
+    )
+    backend.redirect_uri = MagicMock(return_value="https://pretix.example/oidc/callback/")
+
+    request = MagicMock()
+    request.GET = {}
+    request.session = {
+        "oidc_state": {
+            "state-old": {"next": None, "generated_on": 9999999999},
+        }
+    }
+
+    backend.authentication_url(request)
+
+    assert "state-old" in request.session["oidc_state"]
+    assert len(request.session["oidc_state"]) == 2

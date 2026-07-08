@@ -34,6 +34,22 @@ def test_link_native_user_to_oidc_success():
 
 
 @pytest.mark.django_db
+def test_link_native_user_sets_is_verified():
+    with scopes_disabled():
+        user = User.objects.create_user("native@example.com", "password")
+
+        linked = link_native_user_to_oidc(
+            user,
+            "sub-oidc-1",
+            "native@example.com",
+            email_verified=True,
+        )
+
+        linked.refresh_from_db()
+        assert linked.is_verified is True
+
+
+@pytest.mark.django_db
 def test_link_native_user_rejects_email_mismatch():
     with scopes_disabled():
         user = User.objects.create_user("native@example.com", "password")
@@ -123,6 +139,7 @@ def test_oidc_callback_hard_fail_when_linking_disabled(backend_cls, _allow):
             "uuid": "sub-other",
             "email": "native@example.com",
             "fullname": "Native",
+            "email_verified": True,
             "auth_backend": "pretix_oidc",
         },
         {},
@@ -146,6 +163,50 @@ def test_oidc_callback_hard_fail_when_linking_disabled(backend_cls, _allow):
 @pytest.mark.django_db
 @patch("pretix_oidc.views.allow_account_linking", return_value=True)
 @patch("pretix_oidc.views.OIDCAuthBackend")
+def test_oidc_callback_redirects_converted_user_to_native_login(backend_cls, _allow):
+    from django.urls import reverse
+
+    from pretix_oidc.merge import convert_oidc_user_to_native
+    from pretix_oidc.views import oidc_callback
+
+    with scopes_disabled():
+        oidc = User.objects.create_user("oidc@example.com", "password")
+        oidc.auth_backend = "pretix_oidc"
+        oidc.auth_backend_identifier = "sub-converted"
+        oidc.save()
+        convert_oidc_user_to_native(oidc, password="new-secure-password")
+
+    backend = backend_cls.return_value
+    backend.identifier = "pretix_oidc"
+    backend.process_callback.return_value = [
+        {
+            "uuid": "sub-converted",
+            "email": "oidc@example.com",
+            "fullname": "OIDC User",
+            "email_verified": True,
+            "auth_backend": "pretix_oidc",
+        },
+        {},
+        {},
+    ]
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/")
+    request.session = {}
+
+    with patch("pretix_oidc.views.messages") as msg_mock:
+        response = oidc_callback(request)
+
+    assert response.status_code == 302
+    assert response.url == reverse("control:auth.login") + "?backend=native"
+    msg_mock.error.assert_called_once()
+    assert "password login" in msg_mock.error.call_args[0][1].lower()
+    assert "disabled" in msg_mock.error.call_args[0][1].lower()
+
+
+@pytest.mark.django_db
+@patch("pretix_oidc.views.allow_account_linking", return_value=True)
+@patch("pretix_oidc.views.OIDCAuthBackend")
 def test_oidc_callback_conflict_redirects_to_choice(backend_cls, _allow):
     from django.urls import reverse
 
@@ -162,6 +223,7 @@ def test_oidc_callback_conflict_redirects_to_choice(backend_cls, _allow):
             "uuid": "sub-new",
             "email": "native@example.com",
             "fullname": "Native",
+            "email_verified": True,
             "auth_backend": "pretix_oidc",
         },
         {"groups": []},
@@ -179,6 +241,41 @@ def test_oidc_callback_conflict_redirects_to_choice(backend_cls, _allow):
     pending = get_pending_link(request)
     assert pending["email"] == "native@example.com"
     assert pending["uuid"] == "sub-new"
+
+
+@pytest.mark.django_db
+@patch("pretix_oidc.views.allow_account_linking", return_value=True)
+@patch("pretix_oidc.views.OIDCAuthBackend")
+def test_oidc_callback_rejects_unverified_email(backend_cls, _allow):
+    from django.urls import reverse
+
+    from pretix_oidc.views import oidc_callback
+
+    backend = backend_cls.return_value
+    backend.identifier = "pretix_oidc"
+    backend.process_callback.return_value = [
+        {
+            "uuid": "sub-new",
+            "email": "user@example.com",
+            "fullname": "User",
+            "email_verified": False,
+            "auth_backend": "pretix_oidc",
+        },
+        {},
+        {},
+    ]
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/")
+    request.session = {}
+
+    with patch("pretix_oidc.views.messages") as msg_mock:
+        response = oidc_callback(request)
+
+    assert response.status_code == 302
+    assert response.url == reverse("control:auth.login") + "?backend=native"
+    msg_mock.error.assert_called_once()
+    assert "not verified" in msg_mock.error.call_args[0][1].lower()
 
 
 @pytest.mark.django_db
@@ -254,7 +351,12 @@ def test_link_complete_migrates_user():
 
     store_pending_link(
         request,
-        {"uuid": "sub-linked", "email": "native@example.com", "fullname": "Linked"},
+        {
+            "uuid": "sub-linked",
+            "email": "native@example.com",
+            "fullname": "Linked",
+            "email_verified": True,
+        },
         {"groups": []},
         {},
     )

@@ -14,8 +14,11 @@ from pretix.base.auth import BaseAuthBackend
 from pretix.settings import config
 
 from .assignment import claims_dict, is_error_response, pick_claim
+from .linking import persist_session
 
 logger = logging.getLogger(__name__)
+
+OIDC_STATE_TTL = 5 * 60
 
 
 class OIDCAuthBackend(BaseAuthBackend):
@@ -64,16 +67,39 @@ class OIDCAuthBackend(BaseAuthBackend):
     def verbose_name(self):
         return self.title
 
+    def _fresh_oidc_states(self, request):
+        now = int(time.time())
+        states = dict(request.session.get("oidc_state") or {})
+        return {
+            key: value
+            for key, value in states.items()
+            if value.get("generated_on", 0) >= now - OIDC_STATE_TTL
+        }
+
+    def _remember_oidc_state(self, request, state, data):
+        states = self._fresh_oidc_states(request)
+        states[state] = data
+        request.session["oidc_state"] = states
+        persist_session(request)
+
+    def _callback_fail(self, request, reason):
+        logger.warning("OIDC callback failed: %s", reason)
+        request.session["oidc_callback_error"] = reason
+        persist_session(request)
+        return [None, None, None]
+
     def authentication_url(self, request, purpose="login", link_user_id=None):
         oidc_state = rndstr()
-        request.session["oidc_state"] = {
-            oidc_state: {
+        self._remember_oidc_state(
+            request,
+            oidc_state,
+            {
                 "next": request.GET.get("next", None),
                 "generated_on": int(time.time()),
                 "purpose": purpose,
                 "link_user_id": link_user_id,
-            }
-        }
+            },
+        )
 
         auth_req = self.client.construct_AuthorizationRequest(
             request_args={
@@ -101,19 +127,23 @@ class OIDCAuthBackend(BaseAuthBackend):
         )
 
         request.session["oidc_next_url"] = None
-        oidc_state = request.session.pop("oidc_state", None)
         response_state = auth_response.get("state", None)
+        states = self._fresh_oidc_states(request)
 
-        if not oidc_state or not response_state:
-            return [None, None, None]
+        if not states or not response_state:
+            request.session["oidc_state"] = states
+            return self._callback_fail(request, "state_missing")
 
-        if response_state not in oidc_state:
-            return [None, None, None]
+        if response_state not in states:
+            request.session["oidc_state"] = states
+            return self._callback_fail(request, "state_mismatch")
 
-        if oidc_state[response_state]["generated_on"] < time.time() - 5 * 60:
-            return [None, None, None]
+        state_data = states.pop(response_state)
+        request.session["oidc_state"] = states
 
-        state_data = oidc_state[response_state]
+        if state_data["generated_on"] < time.time() - OIDC_STATE_TTL:
+            return self._callback_fail(request, "state_expired")
+
         request.session["oidc_callback_meta"] = {
             "purpose": state_data.get("purpose", "login"),
             "link_user_id": state_data.get("link_user_id"),
@@ -132,14 +162,14 @@ class OIDCAuthBackend(BaseAuthBackend):
             )
         except Exception:
             logger.exception("OIDC access token request failed")
-            return [None, None, None]
+            return self._callback_fail(request, "token_request")
 
         token_response = claims_dict(access_token_response)
         if token_response.get("error"):
             logger.warning(
                 "OIDC access token response error: %s", token_response["error"]
             )
-            return [None, None, None]
+            return self._callback_fail(request, "token_error")
 
         try:
             userinfo = self.client.do_user_info_request(state=auth_response["state"])
@@ -152,7 +182,7 @@ class OIDCAuthBackend(BaseAuthBackend):
 
         id_token = access_token_response.get("id_token")
         if id_token is None:
-            return [None, None, None]
+            return self._callback_fail(request, "missing_id_token")
 
         if is_error_response(userinfo):
             logger.warning(
@@ -162,19 +192,28 @@ class OIDCAuthBackend(BaseAuthBackend):
             userinfo = None
 
         unique_attribute = config.get("oidc", "unique_attribute", fallback="sub")
-        claim_sources = [userinfo, id_token]
+        claim_sources = [id_token, userinfo]
         uuid = pick_claim(claim_sources, unique_attribute)
         email = pick_claim(claim_sources, "email")
         fullname = pick_claim(claim_sources, "name")
+        email_verified = pick_claim(claim_sources, "email_verified")
 
         if not uuid or not email:
-            return [None, None, None]
+            logger.warning(
+                "OIDC callback missing required claims: %s=%r email=%r",
+                unique_attribute,
+                uuid,
+                email,
+            )
+            return self._callback_fail(request, "missing_claims")
 
         user_data = {
             "uuid": uuid,
             "email": email,
             "fullname": fullname,
+            "email_verified": email_verified,
             "auth_backend": self.identifier,
         }
 
+        request.session.pop("oidc_callback_error", None)
         return [user_data, claims_dict(id_token), claims_dict(userinfo)]

@@ -35,6 +35,16 @@ urlpatterns = [
         name="oidc_link_start",
     ),
     path(
+        "control/users/<int:id>/merge-oidc/",
+        views.UserMergeOidcView.as_view(),
+        name="user_merge_oidc",
+    ),
+    path(
+        "control/users/<int:id>/convert-native/",
+        views.UserConvertNativeView.as_view(),
+        name="user_convert_native",
+    ),
+    path(
         "control/organizer/<str:organizer>/teams/assignment_rules/",
         views.AssignmentRulesList.as_view(),
         name="team_assignment_rules",

@@ -1,0 +1,30 @@
+{% extends "pretixcontrol/base.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+{% block title %}{% trans "Merge OpenID Connect account" %}{% endblock %}
+{% block content %}
+    <h1>{% trans "Merge OpenID Connect account" %}</h1>
+    <p>
+        {% blocktrans trimmed with email=target_user.email %}
+            Merge an existing OpenID Connect user account into the native pretix account
+            {{ email }}. The native account will receive the OpenID Connect email address,
+            team memberships from both accounts will be combined, and the OpenID Connect
+            account will be anonymized.
+        {% endblocktrans %}
+    </p>
+    {% if form.oidc_user.field.queryset %}
+        <form action="" method="post" class="form-horizontal">
+            {% csrf_token %}
+            {% bootstrap_form form layout="horizontal" %}
+            <div class="form-group submit-group">
+                <button type="submit" class="btn btn-danger btn-save">
+                    {% trans "Merge OpenID Connect account" %}
+                </button>
+            </div>
+        </form>
+    {% else %}
+        <div class="alert alert-info">
+            {% trans "There are no active OpenID Connect accounts available to merge." %}
+        </div>
+    {% endif %}
+{% endblock %}

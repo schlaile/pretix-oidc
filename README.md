@@ -46,6 +46,8 @@ your `pretix.cfg`. Add the OIDC configuration to that same file in a new
     # staff_value=val_1,val_2
     # when OIDC email matches an existing native account, offer to merge (default: true)
     allow_account_linking=true
+    # reject login/linking unless OIDC reports email_verified (default: true)
+    require_email_verified=true
 
 The callback URI on your pretix will be `/oidc/callback/`, enter this at the
 appropriate place in your OIDC provider.
@@ -109,6 +111,60 @@ on the login page and require native username/password login), add to
     allow_account_linking=false
 
 After linking, password login is disabled and OpenID Connect is required.
+
+### Email verification
+
+By default (`require_email_verified=true`), pretix rejects OpenID Connect logins
+and account linking unless the identity provider sends `email_verified=true`
+(or an equivalent truthy value) for the email claim. Explicit
+`email_verified=false` is always rejected.
+
+Include the `email` scope so your provider returns the claim. To allow logins
+when the claim is missing (pretix customer SSO-compatible behavior), set:
+
+    [oidc]
+    require_email_verified=false
+
+Verified OIDC emails also set `User.is_verified` in pretix.
+
+### Staff merge for duplicate accounts
+
+When a person has both a native pretix account and a separate OpenID Connect
+account with different email addresses, pretix staff can merge them from the
+native user detail page:
+
+1. Open the native user in **Users**.
+2. Click **Merge OpenID Connect account**.
+3. Select the OpenID Connect account and confirm.
+
+Team memberships from both accounts are combined, the native account receives
+the OpenID Connect email address and becomes an OpenID Connect login, and the
+duplicate OpenID Connect account is anonymized.
+
+URL pattern: `/control/users/<native_id>/merge-oidc/`
+
+### Switch OpenID Connect user to password login
+
+To let a single OpenID Connect user sign in with email and password instead
+(without merging into another account):
+
+1. Open the OpenID Connect user in **Users**.
+2. Click **Switch to password login (disable OIDC)**.
+3. Set a new password and optionally enable **Force password change on next login**.
+
+The same user keeps their email, teams, and history. OpenID Connect login is
+disabled; they sign in with the new password from then on. The OpenID Connect
+subject identifier is retained on the account so repeat OIDC sign-in attempts
+are rejected with a clear message instead of failing silently.
+
+URL pattern: `/control/users/<oidc_id>/convert-native/`
+
+Requires an active staff session and recent re-authentication, same as
+**Anonymize user**.
+
+The merge button is injected into the pretix user detail template via the same
+DATA_DIR template sync mechanism used for the combined login page. Restart
+pretix after upgrading the plugin if the button does not appear immediately.
 
 ## Development setup
 
