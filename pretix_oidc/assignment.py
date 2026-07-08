@@ -4,6 +4,33 @@ from pretix.settings import config
 from .models import OIDCTeamAssignmentRule
 
 
+def claims_dict(source):
+    """Normalize dict, pyoidc Message, or None claim sources to a plain dict."""
+    if source is None:
+        return {}
+    if isinstance(source, dict):
+        return source
+    try:
+        return dict(source)
+    except (TypeError, ValueError):
+        return {}
+
+
+def is_error_response(source):
+    return bool(claims_dict(source).get("error"))
+
+
+def pick_claim(sources, key, default=None):
+    for source in sources:
+        claims = claims_dict(source)
+        if not claims or claims.get("error"):
+            continue
+        value = claims.get(key)
+        if value is not None and value != "":
+            return value
+    return default
+
+
 def normalize_claim_values(raw):
     """Coerce claim values to comparable strings."""
     if raw is None:
@@ -14,11 +41,14 @@ def normalize_claim_values(raw):
 
 
 def claim_values(claims_source, attribute, fallback_source=None):
-    values = normalize_claim_values(dig_get(claims_source, attribute, None))
+    claims = claims_dict(claims_source)
+    values = normalize_claim_values(dig_get(claims, attribute, None))
     if values:
         return values
-    if fallback_source is not None:
-        return normalize_claim_values(dig_get(fallback_source, attribute, []))
+    if fallback_source is not None and not is_error_response(fallback_source):
+        return normalize_claim_values(
+            dig_get(claims_dict(fallback_source), attribute, [])
+        )
     return []
 
 

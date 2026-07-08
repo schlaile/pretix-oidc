@@ -2,7 +2,7 @@ import pytest
 from configparser import ConfigParser
 from django.test import RequestFactory
 from django_scopes import scopes_disabled
-from oic.oic.message import IdToken
+from oic.oic.message import IdToken, OpenIDSchema
 from unittest.mock import MagicMock
 
 from pretix_oidc.assignment import (
@@ -10,6 +10,7 @@ from pretix_oidc.assignment import (
     add_user_to_teams,
     claim_values,
     normalize_claim_values,
+    pick_claim,
 )
 from pretix_oidc.models import OIDCTeamAssignmentRule
 from pretix_oidc.views import AssignmentRuleDelete
@@ -58,6 +59,59 @@ def test_claim_values_id_token_takes_precedence_over_userinfo():
     id_token = {"groups": ["from-id-token"]}
     userinfo = {"groups": ["from-userinfo"]}
     assert claim_values(id_token, "groups", userinfo) == ["from-id-token"]
+
+
+def test_pick_claim_falls_back_to_id_token():
+    id_token = IdToken(
+        sub="b5f5e7d5-5f48-4bca-88ff-9591bdfcf4ad",
+        email="daniel@binary.management",
+        name="Daniel Malik",
+        pretix_organizer="binary",
+    )
+    userinfo = OpenIDSchema(email="daniel@binary.management", name="Daniel Malik")
+    assert pick_claim([userinfo, id_token], "sub") == "b5f5e7d5-5f48-4bca-88ff-9591bdfcf4ad"
+    assert pick_claim([userinfo, id_token], "pretix_organizer") == "binary"
+
+
+def test_pocket_id_organizer_claim_in_id_token_only(oidc_user, team_a):
+    with scopes_disabled():
+        OIDCTeamAssignmentRule.objects.create(
+            team=team_a, attribute="pretix_organizer", value="binary"
+        )
+
+    id_token = IdToken(
+        sub="b5f5e7d5-5f48-4bca-88ff-9591bdfcf4ad",
+        pretix_organizer="binary",
+    )
+    userinfo = OpenIDSchema(
+        email="daniel@binary.management",
+        name="Daniel Malik",
+    )
+    add_user_to_teams(oidc_user, id_token, userinfo)
+
+    with scopes_disabled():
+        assert team_a.members.filter(pk=oidc_user.pk).exists()
+
+
+def test_staff_claim_falls_back_to_userinfo(oidc_user, monkeypatch):
+    cfg = ConfigParser()
+    cfg.add_section("oidc")
+    cfg.set("oidc", "staff_claim", "groups")
+    cfg.set("oidc", "staff_value", "admin")
+
+    mock_config = MagicMock()
+    mock_config.has_option.side_effect = cfg.has_option
+    mock_config.get.side_effect = cfg.get
+    monkeypatch.setattr("pretix_oidc.assignment.config", mock_config)
+
+    oidc_user.is_staff = False
+    oidc_user.save(update_fields=["is_staff"])
+
+    add_user_to_staff(oidc_user, {"sub": "x"}, {"groups": ["admin"]})
+
+    with scopes_disabled():
+        oidc_user.refresh_from_db()
+        assert oidc_user.is_staff is True
 
 
 def test_authentik_groups_in_id_token(oidc_user, team_a):

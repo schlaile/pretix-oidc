@@ -13,6 +13,8 @@ from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 from pretix.base.auth import BaseAuthBackend
 from pretix.settings import config
 
+from .assignment import claims_dict, is_error_response, pick_claim
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,24 +113,61 @@ class OIDCAuthBackend(BaseAuthBackend):
 
         request.session["oidc_next_url"] = oidc_state[response_state]["next"]
 
-        access_token_response = self.client.do_access_token_request(
-            state=auth_response["state"],
-            scope=self.scopes,
-            request_args={
-                "code": auth_response["code"],
-                "redirect_uri": self.redirect_uri(request),
-            },
-            authn_method="client_secret_basic",
-        )
+        try:
+            access_token_response = self.client.do_access_token_request(
+                state=auth_response["state"],
+                scope=self.scopes,
+                request_args={
+                    "code": auth_response["code"],
+                    "redirect_uri": self.redirect_uri(request),
+                },
+                authn_method="client_secret_basic",
+            )
+        except Exception:
+            logger.exception("OIDC access token request failed")
+            return [None, None, None]
 
-        userinfo = self.client.do_user_info_request(state=auth_response["state"])
+        token_response = claims_dict(access_token_response)
+        if token_response.get("error"):
+            logger.warning(
+                "OIDC access token response error: %s", token_response["error"]
+            )
+            return [None, None, None]
 
-        id_token = access_token_response["id_token"]
+        try:
+            userinfo = self.client.do_user_info_request(state=auth_response["state"])
+        except Exception:
+            logger.warning(
+                "OIDC userinfo request failed; using id_token claims only",
+                exc_info=True,
+            )
+            userinfo = None
+
+        id_token = access_token_response.get("id_token")
+        if id_token is None:
+            return [None, None, None]
+
+        if is_error_response(userinfo):
+            logger.warning(
+                "OIDC userinfo response error: %s",
+                claims_dict(userinfo).get("error"),
+            )
+            userinfo = None
+
+        unique_attribute = config.get("oidc", "unique_attribute", fallback="sub")
+        claim_sources = [userinfo, id_token]
+        uuid = pick_claim(claim_sources, unique_attribute)
+        email = pick_claim(claim_sources, "email")
+        fullname = pick_claim(claim_sources, "name")
+
+        if not uuid or not email:
+            return [None, None, None]
+
         user_data = {
-            "uuid": userinfo[config.get("oidc", "unique_attribute", fallback="sub")],
-            "email": userinfo["email"],
-            "fullname": userinfo["name"],
+            "uuid": uuid,
+            "email": email,
+            "fullname": fullname,
             "auth_backend": self.identifier,
         }
 
-        return [user_data, id_token, userinfo]
+        return [user_data, claims_dict(id_token), claims_dict(userinfo)]

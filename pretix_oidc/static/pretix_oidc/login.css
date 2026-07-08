@@ -1,0 +1,25 @@
+.form-signin .login-or-divider {
+    display: flex;
+    align-items: center;
+    margin: 18px 0 14px;
+    color: #8a8a8a;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.form-signin .login-or-divider::before,
+.form-signin .login-or-divider::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid #e5e5e5;
+}
+
+.form-signin .login-or-divider span {
+    padding: 0 12px;
+}
+
+.form-signin .btn-external-auth {
+    margin-bottom: 8px;
+}

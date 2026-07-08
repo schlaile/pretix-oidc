@@ -11,11 +11,11 @@ except ImportError:
 class PluginApp(PluginConfig):
     default = True
     name = "pretix_oidc"
-    verbose_name = "pretix OIDC"
+    verbose_name = "pretix OIDC (binary fork)"
 
     class PretixPluginMeta:
-        name = gettext_lazy("pretix OIDC")
-        author = "Jaakko Rinta-Filppula, Felix Schäfer"
+        name = gettext_lazy("pretix OIDC (binary fork)")
+        author = "Jaakko Rinta-Filppula, Felix Schäfer, binary collective"
         description = gettext_lazy("OIDC authentication plugin for pretix")
         visible = False
         version = __version__

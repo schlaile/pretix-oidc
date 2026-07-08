@@ -48,21 +48,27 @@ your `pretix.cfg`. Add the OIDC configuration to that same file in a new
 The callback URI on your pretix will be `/oidc/callback/`, enter this at the
 appropriate place in your OIDC provider.
 
-Please note that all users with the permission to change organizer settings
-will have access to the team assignment rules. Those rules can add users to a
-specific team based on an arbitrary OIDC claim when the users log in, this
-means that users with the permission to change organizer settings might be
-able to enumerate users with a certain OIDC claim when the users log in and
-can lead to a data leak.
+For PocketID: use the URLs from `/.well-known/openid-configuration`, set the
+callback as above, and include `groups` in `scopes` (PocketID only sends group
+membership when that scope is requested). Example:
+
+    scopes=openid,email,profile,groups
+
+`staff_claim` and `staff_value` are optional. They set pretix system staff
+(`User.is_staff`), not organizer access. Leave them out unless you want global
+pretix admins matched by claim (e.g. `staff_claim=groups`,
+`staff_value=pretix-admins`).
 
 ## Configuration
 
-Users belonging to a team with the permission to change organizer settings can
-add team assignment rules on the organizer page > team assignment rules. Users
-can be added to a specific team of that organizer based on the value of
-arbitrary OIDC attributes (claims). Team assignment rules will apply when
-users log in, users matching newly created rules might need to log out and
-back in for the assignment to take effect.
+Organizer access is via team assignment rules, not `staff_*`. Users with
+`can_change_organizer_settings` can add rules under organizer → team assignment
+rules: pick a team, set the OIDC attribute (`groups` for PocketID), and the
+attribute value (exact PocketID group name). Rules apply on login; matching is
+add-only. Users may need to log out and back in after rule changes.
+
+Please note that users with permission to change organizer settings can use these
+rules to enumerate OIDC claim values on login, which can be a data leak.
 
 ## Development setup
 
