@@ -8,11 +8,15 @@ def test_sync_login_template_installs_to_data_dir(tmp_path, monkeypatch):
     plugin_template.parent.mkdir(parents=True)
     plugin_template.write_text("login-template", encoding="utf-8")
 
-    data_template = tmp_path / "data" / "templates" / "pretixcontrol" / "auth" / "login.html"
+    data_template = (
+        tmp_path / "data" / "templates" / "pretixcontrol" / "auth" / "login.html"
+    )
     version_marker = data_template.with_suffix(".pretix_oidc_version")
 
     monkeypatch.setattr(template_sync, "_TEMPLATES_ROOT", tmp_path / "plugin_root")
-    monkeypatch.setattr(template_sync, "_DATA_TEMPLATES_ROOT", tmp_path / "data" / "templates")
+    monkeypatch.setattr(
+        template_sync, "_DATA_TEMPLATES_ROOT", tmp_path / "data" / "templates"
+    )
     plugin_root = tmp_path / "plugin_root" / "pretixcontrol" / "auth"
     plugin_root.mkdir(parents=True)
     (plugin_root / "login.html").write_text("login-template", encoding="utf-8")

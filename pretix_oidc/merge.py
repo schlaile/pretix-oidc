@@ -1,5 +1,4 @@
 import json
-
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from django_scopes import scopes_disabled
@@ -12,7 +11,6 @@ from .linking import (
     BACKEND_IDENTIFIER,
     apply_verified_email,
     link_native_user_to_oidc,
-    parse_email_verified,
 )
 
 
@@ -71,11 +69,15 @@ def merge_oidc_user_into_native(native_user, oidc_user, *, acting_user=None):
         if native_user.pk == oidc_user.pk:
             raise UserMergeError(_("Cannot merge a user with itself."))
         if native_user.auth_backend != "native":
-            raise UserMergeError(_("The target account must use the native login backend."))
+            raise UserMergeError(
+                _("The target account must use the native login backend.")
+            )
         if oidc_user.auth_backend != BACKEND_IDENTIFIER:
             raise UserMergeError(_("The source account must use OpenID Connect."))
         if not oidc_user.auth_backend_identifier:
-            raise UserMergeError(_("The OpenID Connect account has no external identifier."))
+            raise UserMergeError(
+                _("The OpenID Connect account has no external identifier.")
+            )
         if not oidc_user.email:
             raise UserMergeError(_("The OpenID Connect account has no email address."))
 
@@ -128,7 +130,9 @@ def convert_oidc_user_to_native(
         if user.auth_backend != BACKEND_IDENTIFIER:
             raise UserMergeError(_("The account must use OpenID Connect."))
         if not user.auth_backend_identifier:
-            raise UserMergeError(_("The OpenID Connect account has no external identifier."))
+            raise UserMergeError(
+                _("The OpenID Connect account has no external identifier.")
+            )
 
         user.set_password(password)
         user.needs_password_change = needs_password_change

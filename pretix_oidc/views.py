@@ -26,6 +26,7 @@ from .assignment import add_user_to_staff, add_user_to_teams
 from .auth import OIDCAuthBackend  # NOQA
 from .forms import ConvertNativeUserForm, MergeOidcUserForm, OIDCAssignmentRuleForm
 from .linking import (
+    BACKEND_IDENTIFIER,
     AccountLinkingError,
     allow_account_linking,
     apply_verified_email,
@@ -38,11 +39,10 @@ from .linking import (
     persist_session,
     store_pending_link,
 )
-from .linking import BACKEND_IDENTIFIER
 from .merge import (
     UserMergeError,
-    merge_oidc_user_into_native,
     convert_oidc_user_to_native,
+    merge_oidc_user_into_native,
 )
 from .models import OIDCTeamAssignmentRule
 
@@ -532,7 +532,9 @@ class UserConvertNativeView(
         if user.auth_backend != BACKEND_IDENTIFIER:
             raise UserMergeError(_("The source account must use OpenID Connect."))
         if not user.auth_backend_identifier:
-            raise UserMergeError(_("The OpenID Connect account has no external identifier."))
+            raise UserMergeError(
+                _("The OpenID Connect account has no external identifier.")
+            )
         return user
 
     def dispatch(self, request, *args, **kwargs):

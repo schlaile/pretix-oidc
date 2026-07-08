@@ -1,5 +1,4 @@
 from pathlib import Path
-
 from pretix.settings import DATA_DIR
 
 from . import __version__
@@ -30,9 +29,7 @@ def sync_template_override(relative_path):
     installed_version = (
         version_path.read_text(encoding="utf-8") if version_path.is_file() else None
     )
-    installed_content = (
-        data_path.read_bytes() if data_path.is_file() else None
-    )
+    installed_content = data_path.read_bytes() if data_path.is_file() else None
 
     if installed_version == __version__ and installed_content == source:
         return

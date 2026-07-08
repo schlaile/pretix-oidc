@@ -69,7 +69,10 @@ def test_pick_claim_falls_back_to_id_token():
         pretix_organizer="binary",
     )
     userinfo = OpenIDSchema(email="daniel@binary.management", name="Daniel Malik")
-    assert pick_claim([userinfo, id_token], "sub") == "b5f5e7d5-5f48-4bca-88ff-9591bdfcf4ad"
+    assert (
+        pick_claim([userinfo, id_token], "sub")
+        == "b5f5e7d5-5f48-4bca-88ff-9591bdfcf4ad"
+    )
     assert pick_claim([userinfo, id_token], "pretix_organizer") == "binary"
 
 

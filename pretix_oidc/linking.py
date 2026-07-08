@@ -1,6 +1,5 @@
 import json
 import time
-
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from django_scopes import scopes_disabled
@@ -138,7 +137,9 @@ def clear_pending_link(request):
 
 
 @transaction.atomic
-def link_native_user_to_oidc(user, identifier, email, fullname=None, email_verified=None):
+def link_native_user_to_oidc(
+    user, identifier, email, fullname=None, email_verified=None
+):
     if not allow_account_linking():
         raise AccountLinkingError(_("Account linking is disabled."))
     if user.auth_backend != "native":

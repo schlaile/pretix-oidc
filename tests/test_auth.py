@@ -63,7 +63,9 @@ def _callback_backend(id_token, userinfo, *, access_token_response=None):
         backend = OIDCAuthBackend()
 
     backend.client = MagicMock()
-    backend.redirect_uri = MagicMock(return_value="https://pretix.example/oidc/callback/")
+    backend.redirect_uri = MagicMock(
+        return_value="https://pretix.example/oidc/callback/"
+    )
     backend.client.parse_response.return_value = {"state": "state-1", "code": "code-1"}
     if access_token_response is None:
         access_token_response = {"id_token": id_token}
@@ -97,7 +99,9 @@ def test_process_callback_falls_back_to_id_token_for_sub_email_name():
     userinfo = _pocketid_userinfo_no_sub()
 
     backend, request = _callback_backend(id_token, userinfo)
-    user_data, normalized_id_token, normalized_userinfo = backend.process_callback(request)
+    user_data, normalized_id_token, normalized_userinfo = backend.process_callback(
+        request
+    )
 
     assert user_data == {
         "uuid": POCKETID_SUB,
@@ -115,7 +119,9 @@ def test_process_callback_empty_userinfo_valid_id_token():
     userinfo = OpenIDSchema()
 
     backend, request = _callback_backend(id_token, userinfo)
-    user_data, normalized_id_token, normalized_userinfo = backend.process_callback(request)
+    user_data, normalized_id_token, normalized_userinfo = backend.process_callback(
+        request
+    )
 
     assert user_data["uuid"] == POCKETID_SUB
     assert user_data["email"] == POCKETID_EMAIL
@@ -129,7 +135,9 @@ def test_process_callback_ignores_userinfo_error_and_uses_id_token():
     userinfo = OpenIDSchema(error="access_denied")
 
     backend, request = _callback_backend(id_token, userinfo)
-    user_data, normalized_id_token, normalized_userinfo = backend.process_callback(request)
+    user_data, normalized_id_token, normalized_userinfo = backend.process_callback(
+        request
+    )
 
     assert user_data["uuid"] == POCKETID_SUB
     assert user_data["email"] == POCKETID_EMAIL
@@ -183,7 +191,9 @@ def test_authentication_url_keeps_existing_oidc_state():
     backend.client.construct_AuthorizationRequest.return_value = MagicMock(
         request=MagicMock(return_value="https://idp.example/auth?state=new")
     )
-    backend.redirect_uri = MagicMock(return_value="https://pretix.example/oidc/callback/")
+    backend.redirect_uri = MagicMock(
+        return_value="https://pretix.example/oidc/callback/"
+    )
 
     request = MagicMock()
     request.GET = {}

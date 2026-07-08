@@ -74,9 +74,7 @@ class ConvertNativeUserForm(forms.Form):
     needs_password_change = forms.BooleanField(
         required=False,
         label=_("Force password change on next login"),
-        help_text=_(
-            "The user must choose a new password the next time they sign in."
-        ),
+        help_text=_("The user must choose a new password the next time they sign in."),
     )
 
     def __init__(self, source_user, *args, **kwargs):
