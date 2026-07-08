@@ -13,7 +13,7 @@ from pretix_oidc.assignment import (
     pick_claim,
 )
 from pretix_oidc.models import OIDCTeamAssignmentRule
-from pretix_oidc.views import AssignmentRuleDelete
+from pretix_oidc.views import AssignmentRuleDelete, AssignmentRuleEdit
 
 
 @pytest.mark.parametrize(
@@ -291,6 +291,27 @@ def test_delete_queryset_scoped(organizer_a, organizer_b, team_a, team_b):
     request.organizer = organizer_a
 
     view = AssignmentRuleDelete()
+    view.request = request
+    queryset = view.get_queryset()
+
+    assert rule_a in queryset
+    assert rule_b not in queryset
+
+
+def test_edit_queryset_scoped(organizer_a, organizer_b, team_a, team_b):
+    with scopes_disabled():
+        rule_a = OIDCTeamAssignmentRule.objects.create(
+            team=team_a, attribute="groups", value="a"
+        )
+        rule_b = OIDCTeamAssignmentRule.objects.create(
+            team=team_b, attribute="groups", value="b"
+        )
+
+    factory = RequestFactory()
+    request = factory.get("/")
+    request.organizer = organizer_a
+
+    view = AssignmentRuleEdit()
     view.request = request
     queryset = view.get_queryset()
 

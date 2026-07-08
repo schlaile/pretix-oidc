@@ -1,0 +1,29 @@
+{% extends "pretixcontrol/base.html" %}
+{% load i18n %}
+{% block title %}{% trans "OpenID Connect" %}{% endblock %}
+{% block content %}
+    <h1>{% trans "OpenID Connect" %}</h1>
+    {% if not linking_enabled %}
+        <p>{% trans "Account linking is currently disabled." %}</p>
+    {% elif is_native %}
+        <p>
+            {% blocktrans trimmed with provider=provider_name %}
+                Connect your pretix account to {{ provider }}. After linking, you will
+                sign in through OpenID Connect instead of your password.
+            {% endblocktrans %}
+        </p>
+        <p>
+            <a href="{{ start_url }}" class="btn btn-primary">
+                {% blocktrans trimmed with provider=provider_name %}
+                    Connect {{ provider }}
+                {% endblocktrans %}
+            </a>
+        </p>
+    {% else %}
+        <p>
+            {% blocktrans trimmed with provider=provider_name %}
+                Your account is linked to {{ provider }}.
+            {% endblocktrans %}
+        </p>
+    {% endif %}
+{% endblock %}

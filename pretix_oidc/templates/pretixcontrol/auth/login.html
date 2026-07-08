@@ -6,8 +6,9 @@
 {% load pretix_oidc_auth %}
 {% block content %}
     {% external_auth_backends backends as external_backends %}
+    {% show_native_external_auth request backend external_backends as show_external_auth %}
     <link rel="stylesheet" href="{% static "pretix_oidc/login.css" %}">
-    <form class="form-signin{% if external_backends and backend.identifier == "native" %} form-signin-combined{% endif %}" action="" method="post">
+    <form class="form-signin{% if show_external_auth %} form-signin-combined{% endif %}" action="" method="post">
         {% if backends|length > 1 %}
             {% if backend.identifier != "native" or not external_backends %}
                 <ul class="nav nav-pills nav-pills-auth">
@@ -50,7 +51,7 @@
                         {% trans "Register" %}
                     </a>
                 {% endif %}
-                {% if external_backends %}
+                {% if show_external_auth %}
                     <div class="login-or-divider" role="separator" aria-label="{% trans "or" %}">
                         <span>{% trans "or" %}</span>
                     </div>

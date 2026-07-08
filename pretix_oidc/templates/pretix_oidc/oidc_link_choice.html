@@ -1,0 +1,23 @@
+{% extends "pretixcontrol/auth/base.html" %}
+{% load i18n %}
+{% load static %}
+{% block content %}
+    <link rel="stylesheet" href="{% static "pretix_oidc/login.css" %}">
+    <div class="form-signin form-signin-card">
+        <h3>{% trans "Link account" %}</h3>
+        <p>
+            {% blocktrans trimmed with email=pending_email %}
+                An existing pretix account was found for the email address {{ email }}.
+                Would you like to use external login in the future?
+            {% endblocktrans %}
+        </p>
+        <div class="buttons">
+            <a href="{{ auth_redirect_url }}" class="btn btn-primary btn-block">
+                {% trans "Link account" %}
+            </a>
+            <a href="{{ decline_url }}" class="btn btn-default btn-block">
+                {% trans "Log out" %}
+            </a>
+        </div>
+    </div>
+{% endblock %}

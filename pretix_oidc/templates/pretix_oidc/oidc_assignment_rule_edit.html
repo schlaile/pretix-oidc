@@ -2,7 +2,7 @@
 {% load i18n %}
 {% load bootstrap3 %}
 {% block inner %}
-    {% if url_name == "team_assignment_rules.edit" %}
+    {% if rule %}
         <h1>{% trans "Modify team assignment rule" %}</h1>
     {% else %}
         <h1>{% trans "Create team assignment rule" %}</h1>

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2023-02-09 23:10+0100\n"
+"POT-Creation-Date: 2026-07-09 00:21+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,20 +18,37 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #: pretix_oidc/apps.py:17
-msgid "pretix OIDC"
+msgid "pretix OIDC (binary fork)"
 msgstr ""
 
 #: pretix_oidc/apps.py:19
 msgid "OIDC authentication plugin for pretix"
 msgstr ""
 
+#: pretix_oidc/linking.py:79 pretix_oidc/views.py:193 pretix_oidc/views.py:246
+#: pretix_oidc/views.py:311
+msgid "Account linking is disabled."
+msgstr ""
+
+#: pretix_oidc/linking.py:81
+msgid "Only native accounts can be linked."
+msgstr ""
+
+#: pretix_oidc/linking.py:83
+msgid "Email addresses do not match."
+msgstr ""
+
+#: pretix_oidc/linking.py:92
+msgid "This OpenID identity is already linked to another account."
+msgstr ""
+
 #: pretix_oidc/models.py:9
-#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:17
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:36
 msgid "OIDC attribute"
 msgstr ""
 
 #: pretix_oidc/models.py:12
-#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:18
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:37
 msgid "Attribute value"
 msgstr ""
 
@@ -39,9 +56,13 @@ msgstr ""
 msgid "Team assignment rule"
 msgstr ""
 
-#: pretix_oidc/signals.py:15
+#: pretix_oidc/signals.py:17
 #: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:5
 msgid "Team assignment rules"
+msgstr ""
+
+#: pretix_oidc/signals.py:39
+msgid "Connect your account for single sign-on via OpenID Connect."
 msgstr ""
 
 #: pretix_oidc/templates/pretix_oidc/oidc_assignment_rule_delete.html:5
@@ -57,6 +78,7 @@ msgid "Cancel"
 msgstr ""
 
 #: pretix_oidc/templates/pretix_oidc/oidc_assignment_rule_delete.html:15
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:61
 msgid "Delete"
 msgstr ""
 
@@ -65,6 +87,7 @@ msgid "Modify team assignment rule"
 msgstr ""
 
 #: pretix_oidc/templates/pretix_oidc/oidc_assignment_rule_edit.html:8
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:23
 msgid "Create team assignment rule"
 msgstr ""
 
@@ -72,24 +95,191 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:9
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:8
+msgid ""
+"This page lets you map OIDC claim attributes to pretix teams. Matching rules "
+"are applied when users log in via OIDC."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:17
+msgid "You haven't created any team assignment rules yet."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:28
 msgid "Create a new team assignment rule"
 msgstr ""
 
-#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:16
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:35
 msgid "Team name"
 msgstr ""
 
-#: pretix_oidc/views.py:39
-msgid ""
-"We cannot create your user account as a user account in this system already "
-"exists with the same email address."
+#: pretix_oidc/templates/pretix_oidc/oidc_assignment_rules.html:57
+msgid "Edit"
 msgstr ""
 
-#: pretix_oidc/views.py:104
+#: pretix_oidc/templates/pretix_oidc/oidc_link_account.html:3
+#: pretix_oidc/templates/pretix_oidc/oidc_link_account.html:5
+msgid "OpenID Connect"
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_account.html:7
+msgid "Account linking is currently disabled."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_account.html:10
+#, python-format
+msgid ""
+"Connect your pretix account to %(provider)s. After linking, you will sign in "
+"through OpenID Connect instead of your password."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_account.html:17
+#, python-format
+msgid "Connect %(provider)s"
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_account.html:24
+#, python-format
+msgid "Your account is linked to %(provider)s."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_choice.html:7
+#: pretix_oidc/templates/pretix_oidc/oidc_link_choice.html:16
+msgid "Link account"
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_choice.html:9
+#, python-format
+msgid ""
+"An existing pretix account was found for the email address %(email)s. Would "
+"you like to use external login in the future?"
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_choice.html:19
+msgid "Log out"
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_decline.html:7
+msgid "Account linking declined"
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_decline.html:9
+msgid ""
+"You chose not to link your accounts. You can continue signing in with your "
+"existing login method."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_decline.html:15
+msgid ""
+"If you want to use OpenID Connect with a separate account in the future, "
+"change the email address on your pretix account first, then sign in with "
+"OpenID Connect again."
+msgstr ""
+
+#: pretix_oidc/templates/pretix_oidc/oidc_link_decline.html:23
+msgid "Sign in with existing account"
+msgstr ""
+
+#: pretix_oidc/templates/pretixcontrol/auth/login.html:29
+msgid ""
+"It looks like your browser is not accepting our cookie and you need to log "
+"in repeatedly. Please check if your browser is set to block cookies, or "
+"delete all existing cookies and retry."
+msgstr ""
+
+#: pretix_oidc/templates/pretixcontrol/auth/login.html:40
+msgid "Log in"
+msgstr ""
+
+#: pretix_oidc/templates/pretixcontrol/auth/login.html:46
+msgid "Lost password?"
+msgstr ""
+
+#: pretix_oidc/templates/pretixcontrol/auth/login.html:51
+msgid "Register"
+msgstr ""
+
+#: pretix_oidc/templates/pretixcontrol/auth/login.html:55
+#: pretix_oidc/templates/pretixcontrol/auth/login.html:56
+msgid "or"
+msgstr ""
+
+#: pretix_oidc/views.py:61
+msgid "Your account has been linked to OpenID Connect."
+msgstr ""
+
+#: pretix_oidc/views.py:72
+msgid "You must be logged in to link your account."
+msgstr ""
+
+#: pretix_oidc/views.py:80
+msgid "The logged-in account does not match the account that started linking."
+msgstr ""
+
+#: pretix_oidc/views.py:88
+msgid ""
+"The email address from OpenID Connect does not match your pretix account."
+msgstr ""
+
+#: pretix_oidc/views.py:96 pretix_oidc/views.py:260
+msgid "Only native accounts can be linked to OpenID Connect."
+msgstr ""
+
+#: pretix_oidc/views.py:130 pretix_oidc/views.py:177
+#, python-format
+msgid ""
+"An account with the email address %(email)s already exists. Please sign in "
+"with your username and password instead of OpenID Connect."
+msgstr ""
+
+#: pretix_oidc/views.py:148
+msgid ""
+"OpenID Connect sign-in failed. Please try again or sign in with your "
+"username and password."
+msgstr ""
+
+#: pretix_oidc/views.py:198 pretix_oidc/views.py:220
+msgid ""
+"The account linking request has expired. Please sign in with OpenID Connect "
+"again."
+msgstr ""
+
+#: pretix_oidc/views.py:234
+msgid ""
+"Please log in with your pretix account to finish linking it to OpenID "
+"Connect."
+msgstr ""
+
+#: pretix_oidc/views.py:253
+msgid "The account linking request has expired. Please sign in again."
+msgstr ""
+
+#: pretix_oidc/views.py:268
+msgid ""
+"The email address of the account you logged in with does not match the "
+"OpenID Connect identity."
+msgstr ""
+
+#: pretix_oidc/views.py:317
+msgid "Your account is already linked to an external login method."
+msgstr ""
+
+#: pretix_oidc/views.py:325
+msgid "OpenID Connect is not configured correctly."
+msgstr ""
+
+#: pretix_oidc/views.py:381
 msgid "The new assignment rule has been created."
 msgstr ""
 
-#: pretix_oidc/views.py:108
+#: pretix_oidc/views.py:385
 msgid "The assignment rule could not be created."
+msgstr ""
+
+#: pretix_oidc/views.py:393
+msgid "Your changes have been saved."
+msgstr ""
+
+#: pretix_oidc/views.py:397
+msgid "Your changes could not be saved."
 msgstr ""

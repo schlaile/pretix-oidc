@@ -44,6 +44,8 @@ your `pretix.cfg`. Add the OIDC configuration to that same file in a new
     # comma-separated values; user becomes staff if any claim value matches. omit staff_claim and staff_value to leave staff unchanged.
     staff_value=
     # staff_value=val_1,val_2
+    # when OIDC email matches an existing native account, offer to merge (default: true)
+    allow_account_linking=true
 
 The callback URI on your pretix will be `/oidc/callback/`, enter this at the
 appropriate place in your OIDC provider.
@@ -61,14 +63,52 @@ pretix admins matched by claim (e.g. `staff_claim=groups`,
 
 ## Configuration
 
-Organizer access is via team assignment rules, not `staff_*`. Users with
-`can_change_organizer_settings` can add rules under organizer → team assignment
-rules: pick a team, set the OIDC attribute (`groups` for PocketID), and the
-attribute value (exact PocketID group name). Rules apply on login; matching is
-add-only. Users may need to log out and back in after rule changes.
+Organizer access is via team assignment rules, not `staff_*`. Pretix staff
+(`is_staff`) can manage rules under organizer → team assignment rules: pick a
+team, set the OIDC attribute (`groups` for PocketID), and the attribute value
+(exact PocketID group name). Rules apply on login; matching is add-only. Users
+may need to log out and back in after rule changes.
 
-Please note that users with permission to change organizer settings can use these
-rules to enumerate OIDC claim values on login, which can be a data leak.
+Only pretix staff can access team assignment rules. This limits who can
+configure OIDC claim mappings and reduces the risk of enumerating claim values
+on login.
+
+## Account linking
+
+Account linking (merge) is **enabled by default** (`allow_account_linking=true`).
+You do not need to add this to `pretix.cfg` unless you want to change it.
+
+If a user signs in with OpenID Connect but a native pretix account already
+exists for the same email address, pretix offers to **link** the accounts
+instead of creating a duplicate. Linking migrates the existing account to OIDC
+(preserving teams, orders, and history).
+
+Flow when a conflict is detected:
+
+1. User signs in with OpenID Connect.
+2. pretix shows a choice: link the existing account or decline.
+3. **Link account** sends the user through the normal native login (password
+   and 2FA/passkey if enabled).
+4. After successful native authentication, pretix updates the user record to
+   use OIDC for future logins.
+
+If the user declines linking, they can continue with their existing login
+method. To use OpenID Connect with a separate account instead, they should
+change the email address on their pretix account first.
+
+Native users can also start linking from the dashboard widget or
+**Account → OpenID Connect** (`/control/user/oidc-link/`).
+
+### Disabling account linking
+
+To turn off merge/linking and fall back to the previous behavior (show an error
+on the login page and require native username/password login), add to
+`pretix.cfg`:
+
+    [oidc]
+    allow_account_linking=false
+
+After linking, password login is disabled and OpenID Connect is required.
 
 ## Development setup
 

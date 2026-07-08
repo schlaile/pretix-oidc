@@ -1,4 +1,6 @@
 import pytest
+from django.contrib.messages.storage.fallback import FallbackStorage
+from django.core.exceptions import PermissionDenied
 from django.test import RequestFactory
 from django.urls import reverse
 from django_scopes import scopes_disabled
@@ -8,7 +10,8 @@ from unittest.mock import MagicMock, patch
 
 from pretix_oidc.assignment import claim_values
 from pretix_oidc.models import OIDCTeamAssignmentRule
-from pretix_oidc.views import AssignmentRulesList, oidc_callback
+from pretix_oidc.signals import add_team_auto_assign_to_nav_pane
+from pretix_oidc.views import AssignmentRuleEdit, AssignmentRulesList, oidc_callback
 
 
 def test_claim_values_pyoidc_userinfo_fallback():
@@ -27,12 +30,15 @@ def test_oidc_callback_failed_auth_redirects_to_control_login():
     request = factory.get("/oidc/callback/?error=access_denied")
     request.session = {}
 
-    with patch("pretix_oidc.views.OIDCAuthBackend") as backend_cls:
+    with patch("pretix_oidc.views.OIDCAuthBackend") as backend_cls, patch(
+        "pretix_oidc.views.messages"
+    ) as msg_mock:
         backend_cls.return_value.process_callback.return_value = [None, None, None]
         response = oidc_callback(request)
 
     assert response.status_code == 302
-    assert response.url == reverse("control:auth.login")
+    assert response.url == reverse("control:auth.login") + "?backend=native"
+    msg_mock.error.assert_called_once()
 
 
 @pytest.mark.django_db
@@ -81,8 +87,8 @@ def test_oidc_callback_provisions_team_membership(organizer_a, team_a, oidc_user
 def test_assignment_rules_list_includes_organizer_nav(organizer_a, team_a):
     with scopes_disabled():
         admin = User.objects.create_user("admin@example.com", "password")
-        team_a.can_change_organizer_settings = True
-        team_a.save(update_fields=["can_change_organizer_settings"])
+        admin.is_staff = True
+        admin.save(update_fields=["is_staff"])
         team_a.members.add(admin)
 
     factory = RequestFactory()
@@ -105,3 +111,121 @@ def test_assignment_rules_list_includes_organizer_nav(organizer_a, team_a):
     assert response.status_code == 200
     assert "nav_organizer" in response.context_data
     assert response.context_data["organizer"] == organizer_a
+
+
+@pytest.mark.django_db
+def test_assignment_rules_list_denied_for_non_staff(organizer_a, team_a):
+    with scopes_disabled():
+        user = User.objects.create_user("user@example.com", "password")
+        team_a.can_change_organizer_settings = True
+        team_a.save(update_fields=["can_change_organizer_settings"])
+        team_a.members.add(user)
+
+    factory = RequestFactory()
+    request = factory.get(
+        reverse(
+            "plugins:pretix_oidc:team_assignment_rules",
+            kwargs={"organizer": organizer_a.slug},
+        )
+    )
+    request.user = user
+    request.organizer = organizer_a
+    request.session = {}
+
+    with pytest.raises(PermissionDenied):
+        AssignmentRulesList.as_view()(request, organizer=organizer_a.slug)
+
+
+@pytest.mark.django_db
+def test_assignment_rules_nav_visible_only_for_staff(organizer_a, team_a):
+    factory = RequestFactory()
+
+    staff_request = factory.get("/")
+    staff_request.user = MagicMock(is_staff=True)
+    staff_request.organizer = organizer_a
+    staff_request.resolver_match = MagicMock(url_name="team_assignment_rules")
+
+    non_staff_request = factory.get("/")
+    non_staff_request.user = MagicMock(is_staff=False)
+    non_staff_request.organizer = organizer_a
+    non_staff_request.resolver_match = MagicMock(url_name="")
+
+    staff_nav = add_team_auto_assign_to_nav_pane(None, staff_request)
+    non_staff_nav = add_team_auto_assign_to_nav_pane(None, non_staff_request)
+
+    assert len(staff_nav) == 1
+    assert staff_nav[0]["label"] == "Team assignment rules"
+    assert non_staff_nav == []
+
+
+@pytest.mark.django_db
+def test_assignment_rule_edit_form_saves(organizer_a, team_a, assignment_rule):
+    from pretix_oidc.forms import OIDCAssignmentRuleForm
+
+    with scopes_disabled():
+        form = OIDCAssignmentRuleForm(
+            organizer=organizer_a,
+            data={"team": team_a.pk, "attribute": "roles", "value": "editor"},
+            instance=assignment_rule,
+        )
+        assert form.is_valid(), form.errors
+        form.save()
+        assignment_rule.refresh_from_db()
+        assert assignment_rule.attribute == "roles"
+        assert assignment_rule.value == "editor"
+
+
+@pytest.mark.django_db
+def test_assignment_rule_edit_view_get(organizer_a, team_a, assignment_rule):
+    with scopes_disabled():
+        staff = User.objects.create_user("staff@example.com", "password")
+        staff.is_staff = True
+        staff.save(update_fields=["is_staff"])
+
+    factory = RequestFactory()
+    edit_url = reverse(
+        "plugins:pretix_oidc:team_assignment_rules.edit",
+        kwargs={"organizer": organizer_a.slug, "pk": assignment_rule.pk},
+    )
+
+    get_request = factory.get(edit_url)
+    get_request.user = staff
+    get_request.organizer = organizer_a
+    get_request.session = {}
+
+    with patch(
+        "pretix.control.views.organizer.nav_organizer.send",
+        return_value=[],
+    ):
+        get_response = AssignmentRuleEdit.as_view()(
+            get_request, organizer=organizer_a.slug, pk=assignment_rule.pk
+        )
+    assert get_response.status_code == 200
+    assert get_response.context_data["rule"].pk == assignment_rule.pk
+
+    post_request = factory.post(
+        edit_url,
+        {"team": team_a.pk, "attribute": "roles", "value": "editor"},
+    )
+    post_request.user = staff
+    post_request.organizer = organizer_a
+    post_request.session = {}
+    setattr(post_request, "_messages", FallbackStorage(post_request))
+
+    with patch(
+        "pretix.control.views.organizer.nav_organizer.send",
+        return_value=[],
+    ):
+        post_response = AssignmentRuleEdit.as_view()(
+            post_request, organizer=organizer_a.slug, pk=assignment_rule.pk
+        )
+    assert post_response.status_code == 302
+    assert post_response.url == reverse(
+        "plugins:pretix_oidc:team_assignment_rules",
+        kwargs={"organizer": organizer_a.slug},
+    )
+
+    with scopes_disabled():
+        assignment_rule.refresh_from_db()
+        assert assignment_rule.attribute == "roles"
+        assert assignment_rule.value == "editor"

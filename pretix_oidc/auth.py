@@ -64,12 +64,14 @@ class OIDCAuthBackend(BaseAuthBackend):
     def verbose_name(self):
         return self.title
 
-    def authentication_url(self, request):
+    def authentication_url(self, request, purpose="login", link_user_id=None):
         oidc_state = rndstr()
         request.session["oidc_state"] = {
             oidc_state: {
                 "next": request.GET.get("next", None),
                 "generated_on": int(time.time()),
+                "purpose": purpose,
+                "link_user_id": link_user_id,
             }
         }
 
@@ -111,7 +113,12 @@ class OIDCAuthBackend(BaseAuthBackend):
         if oidc_state[response_state]["generated_on"] < time.time() - 5 * 60:
             return [None, None, None]
 
-        request.session["oidc_next_url"] = oidc_state[response_state]["next"]
+        state_data = oidc_state[response_state]
+        request.session["oidc_callback_meta"] = {
+            "purpose": state_data.get("purpose", "login"),
+            "link_user_id": state_data.get("link_user_id"),
+        }
+        request.session["oidc_next_url"] = state_data["next"]
 
         try:
             access_token_response = self.client.do_access_token_request(

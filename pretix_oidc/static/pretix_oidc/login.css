@@ -2,6 +2,17 @@
     max-width: 360px;
 }
 
+.form-signin-card {
+    padding-bottom: 19px;
+    margin-bottom: 30px;
+}
+
+.container > .alert {
+    max-width: 330px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
 .form-signin .nav-pills-auth {
     display: flex;
     flex-wrap: wrap;

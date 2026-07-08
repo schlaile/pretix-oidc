@@ -1,0 +1,27 @@
+{% extends "pretixcontrol/auth/base.html" %}
+{% load i18n %}
+{% load static %}
+{% block content %}
+    <link rel="stylesheet" href="{% static "pretix_oidc/login.css" %}">
+    <div class="form-signin form-signin-card">
+        <h3>{% trans "Account linking declined" %}</h3>
+        <p>
+            {% blocktrans trimmed %}
+                You chose not to link your accounts. You can continue signing in with your
+                existing login method.
+            {% endblocktrans %}
+        </p>
+        <p>
+            {% blocktrans trimmed %}
+                If you want to use OpenID Connect with a separate account in the future,
+                change the email address on your pretix account first, then sign in with
+                OpenID Connect again.
+            {% endblocktrans %}
+        </p>
+        <div class="buttons">
+            <a href="{{ login_url }}" class="btn btn-primary btn-block">
+                {% trans "Sign in with existing account" %}
+            </a>
+        </div>
+    </div>
+{% endblock %}
