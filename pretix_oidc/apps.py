@@ -24,3 +24,6 @@ class PluginApp(PluginConfig):
 
     def ready(self):
         from . import signals  # NOQA
+        from .template_sync import sync_login_template
+
+        sync_login_template()

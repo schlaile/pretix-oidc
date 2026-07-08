@@ -7,10 +7,10 @@
 {% block content %}
     {% external_auth_backends backends as external_backends %}
     <link rel="stylesheet" href="{% static "pretix_oidc/login.css" %}">
-    <form class="form-signin" action="" method="post">
+    <form class="form-signin{% if external_backends and backend.identifier == "native" %} form-signin-combined{% endif %}" action="" method="post">
         {% if backends|length > 1 %}
             {% if backend.identifier != "native" or not external_backends %}
-                <ul class="nav nav-pills">
+                <ul class="nav nav-pills nav-pills-auth">
                     {% for b in backends %}
                         {% if b.visible %}
                             <li class="{% if backend.identifier == b.identifier %}active{% endif %}">
@@ -21,7 +21,6 @@
                         {% endif %}
                     {% endfor %}
                 </ul>
-                <br>
             {% endif %}
         {% endif %}
         {% if possible_cookie_problem %}
@@ -42,12 +41,12 @@
             {% endif %}
             {% if backend.identifier == "native" %}
                 {% if can_reset %}
-                    <a href="{% url "control:auth.forgot" %}" class="btn btn-link btn-block">
+                    <a href="{% url "control:auth.forgot" %}" class="btn btn-link btn-block btn-auth-link">
                         {% trans "Lost password?" %}
                     </a>
                 {% endif %}
                 {% if can_register %}
-                    <a href="{% url "control:auth.register" %}" class="btn btn-link btn-block">
+                    <a href="{% url "control:auth.register" %}" class="btn btn-link btn-block btn-auth-link">
                         {% trans "Register" %}
                     </a>
                 {% endif %}
