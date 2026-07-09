@@ -31,6 +31,7 @@ from .linking import (
     allow_account_linking,
     apply_verified_email,
     clear_pending_link,
+    clear_stale_auth_session,
     ensure_email_verified,
     find_converted_native_user,
     find_native_user_by_email,
@@ -48,6 +49,7 @@ from .models import OIDCTeamAssignmentRule
 
 
 def _finish_oidc_login(request, user, id_token, userinfo):
+    clear_stale_auth_session(request, user)
     with scopes_disabled():
         add_user_to_teams(user, id_token, userinfo)
         add_user_to_staff(user, id_token, userinfo)

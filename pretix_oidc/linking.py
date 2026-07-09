@@ -80,10 +80,42 @@ def allow_account_linking():
 
 
 def persist_session(request):
+    """Mark the session dirty; let Django save it with the response.
+
+    Do not call session.save() here. An eager save can race with other
+    concurrent requests and overwrite unrelated session keys such as
+    pretix_auth_2fa_user during the 2FA login step.
+    """
     if hasattr(request.session, "modified"):
         request.session.modified = True
-    if hasattr(request.session, "save"):
-        request.session.save()
+
+
+def clear_stale_auth_session(request, user):
+    """Drop django auth session keys that refer to a different user.
+
+    During 2FA, pretix stores the user pk in pretix_auth_2fa_user but does
+    not log the user in yet. If _auth_user_id still points at another account
+    (common after merging OIDC into native), django.contrib.auth.login()
+    calls session.flush() when the passkey step succeeds. That wipes
+    pretix_auth_2fa_user and pretix's Login2FAView then crashes with KeyError.
+    """
+    from django.contrib.auth import (
+        BACKEND_SESSION_KEY,
+        HASH_SESSION_KEY,
+        SESSION_KEY,
+    )
+
+    stored_pk = request.session.get(SESSION_KEY)
+    if stored_pk is None:
+        return
+    try:
+        matches = int(stored_pk) == user.pk
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
+        request.session.pop(SESSION_KEY, None)
+        request.session.pop(BACKEND_SESSION_KEY, None)
+        request.session.pop(HASH_SESSION_KEY, None)
 
 
 def session_safe_claims(data):

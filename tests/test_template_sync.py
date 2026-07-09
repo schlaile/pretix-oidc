@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pretix_oidc.template_sync as template_sync
 
 

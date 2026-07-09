@@ -3,8 +3,7 @@ import time
 from django.test import RequestFactory
 from django_scopes import scopes_disabled
 from pretix.base.models import User
-from pretix.base.models.auth import EmailAddressTakenError
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from pretix_oidc.linking import (
     PENDING_LINK_SESSION_KEY,
