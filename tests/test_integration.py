@@ -1,6 +1,7 @@
 import pytest
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.core.exceptions import PermissionDenied
+from django.http import HttpResponseRedirect
 from django.test import RequestFactory
 from django.urls import reverse
 from django_scopes import scopes_disabled
@@ -37,8 +38,9 @@ def test_oidc_callback_failed_auth_redirects_to_control_login():
         response = oidc_callback(request)
 
     assert response.status_code == 302
-    assert response.url == reverse("control:auth.login") + "?backend=native"
-    msg_mock.error.assert_called_once()
+    assert response.url == reverse("control:auth.login") + "?oidc_error=failed"
+    assert "backend=native" not in response.url
+    msg_mock.error.assert_not_called()
 
 
 @pytest.mark.django_db
@@ -62,6 +64,7 @@ def test_oidc_callback_provisions_team_membership(organizer_a, team_a, oidc_user
         "uuid": "sub-123",
         "email": "oidc@example.com",
         "fullname": "OIDC User",
+        "email_verified": True,
         "auth_backend": "pretix_oidc",
     }
 
@@ -71,7 +74,7 @@ def test_oidc_callback_provisions_team_membership(organizer_a, team_a, oidc_user
         backend = backend_cls.return_value
         backend.identifier = "pretix_oidc"
         backend.process_callback.return_value = [user_data, id_token, userinfo]
-        process_login.return_value = MagicMock(status_code=302)
+        process_login.return_value = HttpResponseRedirect("/control/")
 
         oidc_callback(request)
 

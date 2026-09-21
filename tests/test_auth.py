@@ -181,7 +181,7 @@ def test_process_callback_rejects_missing_id_token():
     assert request.session["oidc_callback_error"] == "missing_id_token"
 
 
-def test_authentication_url_keeps_existing_oidc_state():
+def test_authorize_redirect_url_keeps_existing_oidc_state():
     with patch("pretix_oidc.auth.config", _mock_config()):
         backend = OIDCAuthBackend()
 
@@ -203,10 +203,34 @@ def test_authentication_url_keeps_existing_oidc_state():
         }
     }
 
-    backend.authentication_url(request)
+    assert (
+        backend.authorize_redirect_url(request)
+        == "https://idp.example/auth?state=new"
+    )
 
     assert "state-old" in request.session["oidc_state"]
     assert len(request.session["oidc_state"]) == 2
+
+
+def test_authentication_url_does_not_write_session_state():
+    with patch("pretix_oidc.auth.config", _mock_config()):
+        backend = OIDCAuthBackend()
+
+    request = MagicMock()
+    request.GET = {"next": "/control/events/"}
+    request.session = {
+        "oidc_state": {
+            "state-old": {"next": None, "generated_on": 9999999999},
+        },
+        "pretix_auth_2fa_user": 2,
+    }
+
+    url = backend.authentication_url(request)
+
+    assert "oidc/login/" in url
+    assert "next=" in url
+    assert list(request.session["oidc_state"]) == ["state-old"]
+    assert request.session["pretix_auth_2fa_user"] == 2
 
 
 class _SessionStore(dict):
@@ -256,3 +280,72 @@ def test_authentication_url_preserves_2fa_session_keys():
 
     assert request.session["pretix_auth_2fa_user"] == 2
     assert request.session["pretix_auth_2fa_time"] == "1234567890"
+    assert request.session["oidc_state"] == {}
+
+
+def test_process_callback_replay_does_not_exchange_code_again():
+    from pretix_oidc.auth import store_code_replay
+
+    id_token = _pocketid_id_token()
+    userinfo = _pocketid_userinfo_no_sub()
+    backend, request = _callback_backend(id_token, userinfo)
+
+    first = backend.process_callback(request)
+
+    assert first[0]["uuid"] == POCKETID_SUB
+    assert backend.client.do_access_token_request.call_count == 1
+
+    store_code_replay(request, "code-1", status="ok", next="/control/")
+    assert backend.process_callback(request) == [None, None, None]
+    assert backend.client.do_access_token_request.call_count == 1
+
+
+def test_process_callback_does_not_save_the_session():
+    id_token = _pocketid_id_token()
+    userinfo = _pocketid_userinfo_no_sub()
+    backend, request = _callback_backend(id_token, userinfo)
+    request.session = _SessionStore(**request.session)
+
+    user_data, _, _ = backend.process_callback(request)
+
+    assert user_data["uuid"] == POCKETID_SUB
+    assert backend.client.do_access_token_request.call_count == 1
+
+
+def test_process_callback_without_code_does_not_call_the_token_endpoint():
+    id_token = _pocketid_id_token()
+    userinfo = _pocketid_userinfo_no_sub()
+    backend, request = _callback_backend(id_token, userinfo)
+    backend.client.parse_response.return_value = {
+        "state": "state-1",
+        "error": "access_denied",
+    }
+
+    assert backend.process_callback(request) == [None, None, None]
+    backend.client.do_access_token_request.assert_not_called()
+    assert request.session["oidc_callback_error"] == "failed"
+    assert "state-1" not in request.session["oidc_state"]
+
+
+def test_process_callback_lock_skips_exchange_without_touching_state():
+    id_token = _pocketid_id_token()
+    userinfo = _pocketid_userinfo_no_sub()
+    backend, request = _callback_backend(id_token, userinfo)
+
+    with patch("pretix_oidc.auth.claim_code_for_exchange", return_value=False):
+        assert backend.process_callback(request) == [None, None, None]
+
+    backend.client.do_access_token_request.assert_not_called()
+    assert request.oidc_code_inflight is True
+    assert "state-1" in request.session["oidc_state"]
+
+
+def test_process_callback_parse_error_is_a_retryable_failure():
+    id_token = _pocketid_id_token()
+    userinfo = _pocketid_userinfo_no_sub()
+    backend, request = _callback_backend(id_token, userinfo)
+    backend.client.parse_response.side_effect = ValueError("bad response")
+
+    assert backend.process_callback(request) == [None, None, None]
+    backend.client.do_access_token_request.assert_not_called()
+    assert request.session["oidc_callback_error"] == "failed"

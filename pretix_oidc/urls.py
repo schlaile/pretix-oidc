@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
     path("oidc/callback/", views.oidc_callback, name="oidc_callback"),
+    path("oidc/login/", views.oidc_login, name="oidc_login"),
     path(
         "oidc/link/",
         views.OIDCLinkChoiceView.as_view(),

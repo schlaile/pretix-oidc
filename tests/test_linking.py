@@ -294,9 +294,162 @@ def test_oidc_callback_failure_shows_login_message(backend_cls):
         response = oidc_callback(request)
 
     assert response.status_code == 302
-    assert response.url == reverse("control:auth.login") + "?backend=native"
-    msg_mock.error.assert_called_once()
-    assert "OpenID Connect sign-in failed" in msg_mock.error.call_args[0][1]
+    assert response.url == reverse("control:auth.login") + "?oidc_error=failed"
+    assert "backend=native" not in response.url
+    assert "no-store" in response["Cache-Control"]
+    msg_mock.error.assert_not_called()
+
+
+@pytest.mark.django_db
+@patch("pretix_oidc.views.OIDCAuthBackend")
+def test_oidc_callback_retryable_error_survives_reload(backend_cls):
+    from django.urls import reverse
+
+    from pretix_oidc.views import oidc_callback
+
+    backend_cls.return_value.process_callback.return_value = [None, None, None]
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/?code=abc&state=xyz")
+    request.session = {"oidc_callback_error": "state_mismatch"}
+
+    response = oidc_callback(request)
+
+    login_url = reverse("control:auth.login") + "?oidc_error=state_mismatch"
+    assert response.url == login_url
+    assert "backend=native" not in response.url
+
+    replay = factory.get("/oidc/callback/?code=abc&state=xyz")
+    replay.session = request.session
+    replay.user = type("User", (), {"is_authenticated": False})()
+    replay_response = oidc_callback(replay)
+
+    backend_cls.return_value.process_callback.assert_called_once()
+    assert replay_response.url == login_url
+
+
+@pytest.mark.django_db
+def test_oidc_callback_replay_of_success_skips_backend():
+    from pretix_oidc.auth import OIDC_REPLAY_SESSION_KEY, code_replay_key
+    from pretix_oidc.views import oidc_callback
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/?code=code-1&state=state-1")
+    request.user = type("User", (), {"is_authenticated": True})()
+    request.session = {
+        OIDC_REPLAY_SESSION_KEY: {
+            code_replay_key("code-1"): {
+                "status": "ok",
+                "next": "/control/",
+                "generated_on": int(time.time()),
+            }
+        }
+    }
+
+    with patch("pretix_oidc.views.OIDCAuthBackend") as backend_cls:
+        response = oidc_callback(request)
+
+    backend_cls.assert_not_called()
+    assert response.url == "/control/"
+    assert "no-store" in response["Cache-Control"]
+
+
+@pytest.mark.django_db
+def test_oidc_callback_replay_of_success_returns_to_2fa():
+    from django.urls import reverse
+
+    from pretix_oidc.auth import OIDC_REPLAY_SESSION_KEY, code_replay_key
+    from pretix_oidc.views import oidc_callback
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/?code=code-1&state=state-1")
+    request.user = type("User", (), {"is_authenticated": False})()
+    request.session = {
+        "pretix_auth_2fa_user": 5,
+        OIDC_REPLAY_SESSION_KEY: {
+            code_replay_key("code-1"): {
+                "status": "ok",
+                "next": "/control/events/",
+                "generated_on": int(time.time()),
+            }
+        },
+    }
+
+    with patch("pretix_oidc.views.OIDCAuthBackend") as backend_cls:
+        response = oidc_callback(request)
+
+    backend_cls.assert_not_called()
+    assert response.url.startswith(reverse("control:auth.login.2fa"))
+    assert "next=" in response.url
+    assert "no-store" in response["Cache-Control"]
+
+
+@pytest.mark.django_db
+def test_oidc_callback_replay_prefers_completed_login_over_stale_2fa():
+    from pretix_oidc.auth import OIDC_REPLAY_SESSION_KEY, code_replay_key
+    from pretix_oidc.views import oidc_callback
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/?code=code-1&state=state-1")
+    request.user = type("User", (), {"is_authenticated": True})()
+    request.session = {
+        "pretix_auth_2fa_user": 5,
+        OIDC_REPLAY_SESSION_KEY: {
+            code_replay_key("code-1"): {
+                "status": "ok",
+                "next": "/control/",
+                "generated_on": int(time.time()),
+            }
+        },
+    }
+
+    with patch("pretix_oidc.views.OIDCAuthBackend") as backend_cls:
+        response = oidc_callback(request)
+
+    backend_cls.assert_not_called()
+    assert response.url == "/control/"
+
+
+def test_oidc_callback_inflight_does_not_record_a_new_failure():
+    from pretix_oidc.auth import OIDC_REPLAY_SESSION_KEY
+    from pretix_oidc.views import oidc_callback
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/callback/?code=code-1&state=state-1")
+    request.session = {"oidc_state": {"state-1": {"generated_on": 1}}}
+
+    def _inflight(callback_request):
+        callback_request.oidc_code_inflight = True
+        return [None, None, None]
+
+    with patch("pretix_oidc.views.OIDCAuthBackend") as backend_cls:
+        backend_cls.return_value.process_callback.side_effect = _inflight
+        response = oidc_callback(request)
+
+    assert "oidc_error=failed" in response.url
+    assert OIDC_REPLAY_SESSION_KEY not in request.session
+    assert request.session["oidc_state"]["state-1"]["generated_on"] == 1
+
+
+def test_oidc_login_mints_provider_redirect_with_no_store():
+    from unittest.mock import MagicMock
+
+    from pretix_oidc.views import oidc_login
+
+    factory = RequestFactory()
+    request = factory.get("/oidc/login/?next=/control/")
+    request.session = {}
+    backend = MagicMock()
+    backend.client = object()
+    backend.authorize_redirect_url.return_value = "https://idp.example/auth?state=new"
+
+    with patch("pretix_oidc.views.OIDCAuthBackend", return_value=backend):
+        response = oidc_login(request)
+
+    assert response.status_code == 302
+    assert response.url == "https://idp.example/auth?state=new"
+    assert "no-store" in response["Cache-Control"]
+    assert response["Pragma"] == "no-cache"
+    backend.authorize_redirect_url.assert_called_once()
 
 
 def test_link_auth_redirect_builds_native_login_url():

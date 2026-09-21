@@ -17,3 +17,13 @@ def show_native_external_auth(request, backend, external_backends):
     if backend.identifier != "native" or not external_backends:
         return False
     return request.GET.get("backend") != "native"
+
+
+@register.simple_tag
+def oidc_login_error(request):
+    reason = request.GET.get("oidc_error")
+    if not reason:
+        return ""
+    from pretix_oidc.views import oidc_callback_error_message
+
+    return oidc_callback_error_message(reason)

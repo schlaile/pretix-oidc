@@ -1,6 +1,8 @@
+import hashlib
 import logging
 import time
 from configparser import NoOptionError, NoSectionError
+from urllib.parse import quote
 from django.urls import reverse
 from oic import rndstr
 from oic.oic import Client
@@ -19,6 +21,69 @@ from .linking import persist_session
 logger = logging.getLogger(__name__)
 
 OIDC_STATE_TTL = 5 * 60
+OIDC_REPLAY_SESSION_KEY = "oidc_code_replay"
+TERMINAL_REPLAY_STATUSES = ("ok", "error", "native", "redirect")
+
+
+def code_replay_key(code):
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def fresh_code_replays(request):
+    now = int(time.time())
+    replays = dict(request.session.get(OIDC_REPLAY_SESSION_KEY) or {})
+    return {
+        key: value
+        for key, value in replays.items()
+        if value.get("generated_on", 0) >= now - OIDC_STATE_TTL
+    }
+
+
+def get_code_replay(request, code):
+    if not code:
+        return None
+    return fresh_code_replays(request).get(code_replay_key(code))
+
+
+def store_code_replay(request, code, **fields):
+    """Remember a callback outcome so a reload does not redeem the code again.
+
+    Terminal outcomes stick. A later failure must not replace a success.
+    """
+    if not code:
+        return None
+    existing = get_code_replay(request, code)
+    if existing and existing.get("status") in TERMINAL_REPLAY_STATUSES:
+        return existing
+    replays = fresh_code_replays(request)
+    replay = {"generated_on": int(time.time()), **fields}
+    replays[code_replay_key(code)] = replay
+    request.session[OIDC_REPLAY_SESSION_KEY] = replays
+    persist_session(request)
+    return replay
+
+
+def claim_code_for_exchange(code):
+    """Return False when another request is already redeeming this code.
+
+    The marker lives in the shared cache, not in an eager session.save().
+    Saving the session mid-request races with the 2FA step and can drop
+    pretix_auth_2fa_user. Without Redis or memcached the lock is skipped
+    and a later reload still follows the session outcome.
+    """
+    if not code:
+        return True
+    from django.conf import settings
+
+    if not getattr(settings, "REAL_CACHE_USED", False):
+        return True
+    from django.core.cache import cache
+
+    try:
+        return cache.add("pretix_oidc:code:" + code_replay_key(code), 1, OIDC_STATE_TTL)
+    except Exception:
+        logger.warning("OIDC code lock unavailable", exc_info=True)
+        return True
 
 
 class OIDCAuthBackend(BaseAuthBackend):
@@ -82,13 +147,32 @@ class OIDCAuthBackend(BaseAuthBackend):
         request.session["oidc_state"] = states
         persist_session(request)
 
-    def _callback_fail(self, request, reason):
+    def _callback_fail(self, request, reason, code=None):
         logger.warning("OIDC callback failed: %s", reason)
+        existing = get_code_replay(request, code)
+        if existing and existing.get("status") in TERMINAL_REPLAY_STATUSES:
+            if existing.get("status") == "error" and existing.get("reason"):
+                request.session["oidc_callback_error"] = existing["reason"]
+            else:
+                request.session["oidc_callback_error"] = reason
+            persist_session(request)
+            return [None, None, None]
         request.session["oidc_callback_error"] = reason
-        persist_session(request)
+        if code:
+            store_code_replay(request, code, status="error", reason=reason)
+        else:
+            persist_session(request)
         return [None, None, None]
 
-    def authentication_url(self, request, purpose="login", link_user_id=None):
+    def authentication_url(self, request):
+        """Stable login-button URL. State is minted when the user clicks."""
+        url = reverse("plugins:pretix_oidc:oidc_login")
+        next_url = request.GET.get("next")
+        if next_url:
+            return url + "?next=" + quote(next_url, safe="")
+        return url
+
+    def authorize_redirect_url(self, request, purpose="login", link_user_id=None):
         oidc_state = rndstr()
         self._remember_oidc_state(
             request,
@@ -120,56 +204,84 @@ class OIDCAuthBackend(BaseAuthBackend):
         return request.session.pop("oidc_next_url", None)
 
     def process_callback(self, request):
-        auth_response = self.client.parse_response(
-            AuthorizationResponse,
-            info=request.META["QUERY_STRING"],
-            sformat="urlencoded",
-        )
+        try:
+            auth_response = self.client.parse_response(
+                AuthorizationResponse,
+                info=request.META["QUERY_STRING"],
+                sformat="urlencoded",
+            )
+        except Exception:
+            logger.exception("OIDC authorization response could not be parsed")
+            return self._callback_fail(request, "failed")
 
-        request.session["oidc_next_url"] = None
+        code = auth_response.get("code")
+        replay = get_code_replay(request, code)
+        if replay and replay.get("status") in (*TERMINAL_REPLAY_STATUSES, "pending"):
+            if replay.get("status") == "error" and replay.get("reason"):
+                request.session["oidc_callback_error"] = replay["reason"]
+                persist_session(request)
+            return [None, None, None]
+
         response_state = auth_response.get("state", None)
         states = self._fresh_oidc_states(request)
 
         if not states or not response_state:
             request.session["oidc_state"] = states
-            return self._callback_fail(request, "state_missing")
+            return self._callback_fail(request, "state_missing", code)
 
         if response_state not in states:
             request.session["oidc_state"] = states
-            return self._callback_fail(request, "state_mismatch")
+            return self._callback_fail(request, "state_mismatch", code)
 
-        state_data = states.pop(response_state)
+        state_data = states[response_state]
+        if state_data.get("generated_on", 0) < time.time() - OIDC_STATE_TTL:
+            states.pop(response_state, None)
+            request.session["oidc_state"] = states
+            return self._callback_fail(request, "state_expired", code)
+
+        if not code:
+            states.pop(response_state, None)
+            request.session["oidc_state"] = states
+            return self._callback_fail(request, "failed")
+
+        if not claim_code_for_exchange(code):
+            request.oidc_code_inflight = True
+            return [None, None, None]
+
+        states.pop(response_state, None)
         request.session["oidc_state"] = states
-
-        if state_data["generated_on"] < time.time() - OIDC_STATE_TTL:
-            return self._callback_fail(request, "state_expired")
-
         request.session["oidc_callback_meta"] = {
             "purpose": state_data.get("purpose", "login"),
             "link_user_id": state_data.get("link_user_id"),
         }
-        request.session["oidc_next_url"] = state_data["next"]
+        request.session["oidc_next_url"] = state_data.get("next")
+        store_code_replay(
+            request,
+            code,
+            status="pending",
+            next=state_data.get("next"),
+        )
 
         try:
             access_token_response = self.client.do_access_token_request(
-                state=auth_response["state"],
+                state=response_state,
                 scope=self.scopes,
                 request_args={
-                    "code": auth_response["code"],
+                    "code": code,
                     "redirect_uri": self.redirect_uri(request),
                 },
                 authn_method="client_secret_basic",
             )
         except Exception:
             logger.exception("OIDC access token request failed")
-            return self._callback_fail(request, "token_request")
+            return self._callback_fail(request, "token_request", code)
 
         token_response = claims_dict(access_token_response)
         if token_response.get("error"):
             logger.warning(
                 "OIDC access token response error: %s", token_response["error"]
             )
-            return self._callback_fail(request, "token_error")
+            return self._callback_fail(request, "token_error", code)
 
         try:
             userinfo = self.client.do_user_info_request(state=auth_response["state"])
@@ -182,7 +294,7 @@ class OIDCAuthBackend(BaseAuthBackend):
 
         id_token = access_token_response.get("id_token")
         if id_token is None:
-            return self._callback_fail(request, "missing_id_token")
+            return self._callback_fail(request, "missing_id_token", code)
 
         if is_error_response(userinfo):
             logger.warning(
@@ -205,7 +317,7 @@ class OIDCAuthBackend(BaseAuthBackend):
                 uuid,
                 email,
             )
-            return self._callback_fail(request, "missing_claims")
+            return self._callback_fail(request, "missing_claims", code)
 
         user_data = {
             "uuid": uuid,

@@ -4,6 +4,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.decorators import method_decorator
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.translation import gettext as _
 from django.views import View
 from django.views.decorators.cache import never_cache
@@ -23,7 +24,7 @@ from pretix.helpers.compat import CompatDeleteView
 from urllib.parse import quote
 
 from .assignment import add_user_to_staff, add_user_to_teams
-from .auth import OIDCAuthBackend  # NOQA
+from .auth import OIDCAuthBackend, get_code_replay, store_code_replay  # NOQA
 from .forms import ConvertNativeUserForm, MergeOidcUserForm, OIDCAssignmentRuleForm
 from .linking import (
     BACKEND_IDENTIFIER,
@@ -48,12 +49,26 @@ from .merge import (
 from .models import OIDCTeamAssignmentRule
 
 
+def _no_store(response):
+    response["Cache-Control"] = "no-store"
+    response["Pragma"] = "no-cache"
+    return response
+
+
 def _finish_oidc_login(request, user, id_token, userinfo):
     clear_stale_auth_session(request, user)
+    next_url = request.session.get("oidc_next_url")
     with scopes_disabled():
         add_user_to_teams(user, id_token, userinfo)
         add_user_to_staff(user, id_token, userinfo)
-    return process_login(request, user, False)
+    response = process_login(request, user, False)
+    # After process_login: django's auth_login() may flush the session when
+    # the previous auth hash does not match, which would drop a replay record
+    # stored earlier.
+    code = request.GET.get("code")
+    if code:
+        store_code_replay(request, code, status="ok", next=next_url)
+    return _no_store(response)
 
 
 def _complete_account_link(request, user, pending):
@@ -130,14 +145,16 @@ def _oidc_callback_profile_link(request, user_data, id_token, userinfo, callback
 
 
 def _redirect_to_native_login(request, message=None):
+    code = request.GET.get("code")
+    if code:
+        store_code_replay(request, code, status="native")
     if message:
         messages.error(request, message)
         persist_session(request)
-    return redirect(reverse("control:auth.login") + "?backend=native")
+    return _no_store(redirect(reverse("control:auth.login") + "?backend=native"))
 
 
-def _oidc_callback_error_message(request):
-    reason = request.session.pop("oidc_callback_error", None)
+def oidc_callback_error_message(reason):
     if reason in ("state_missing", "state_mismatch", "state_expired"):
         return _(
             "Your OpenID Connect login session expired or was interrupted. "
@@ -164,12 +181,67 @@ def _oidc_callback_error_message(request):
     )
 
 
+_RETRYABLE_OIDC_ERRORS = {
+    "state_missing",
+    "state_mismatch",
+    "state_expired",
+    "token_request",
+    "token_error",
+    "missing_id_token",
+    "missing_claims",
+    "failed",
+}
+
+
+def _redirect_retryable_error(request, reason):
+    if reason not in _RETRYABLE_OIDC_ERRORS:
+        reason = "failed"
+    return _no_store(redirect(reverse("control:auth.login") + "?oidc_error=" + reason))
+
+
+def _remember_redirect_replay(request, response):
+    code = request.GET.get("code")
+    location = getattr(response, "url", None)
+    if code and isinstance(location, str):
+        store_code_replay(request, code, status="redirect", location=location)
+
+
+def _redirect_completed_login(request, next_url):
+    user = getattr(request, "user", None)
+    if getattr(user, "is_authenticated", False):
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts=None):
+            return _no_store(redirect(next_url))
+        return _no_store(redirect(reverse("control:index")))
+    if request.session.get("pretix_auth_2fa_user"):
+        url = reverse("control:auth.login.2fa")
+        if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts=None):
+            url += "?next=" + quote(next_url)
+        return _no_store(redirect(url))
+    return _redirect_retryable_error(request, "state_expired")
+
+
+def _redirect_for_replay(request, replay):
+    status = replay.get("status")
+    if status == "error":
+        return _redirect_retryable_error(request, replay.get("reason") or "failed")
+    if status == "native":
+        return _no_store(redirect(reverse("control:auth.login") + "?backend=native"))
+    if status == "redirect":
+        location = replay.get("location")
+        if location and url_has_allowed_host_and_scheme(location, allowed_hosts=None):
+            return _no_store(redirect(location))
+        return _redirect_retryable_error(request, "failed")
+    if status == "ok":
+        return _redirect_completed_login(request, replay.get("next"))
+    return _redirect_retryable_error(request, "failed")
+
+
 def _redirect_to_link_choice(request, user_data, id_token, userinfo):
     verification_error = ensure_email_verified(user_data)
     if verification_error:
         return _redirect_to_native_login(request, verification_error)
     store_pending_link(request, user_data, id_token, userinfo)
-    return redirect(reverse("plugins:pretix_oidc:oidc_link_choice"))
+    return _no_store(redirect(reverse("plugins:pretix_oidc:oidc_link_choice")))
 
 
 def _handle_native_email_collision(request, user_data, id_token, userinfo):
@@ -188,26 +260,51 @@ def _handle_native_email_collision(request, user_data, id_token, userinfo):
     )
 
 
+@never_cache
+def oidc_login(request):
+    auth_backend = OIDCAuthBackend()
+    if not getattr(auth_backend, "client", None):
+        messages.error(request, _("OpenID Connect is not configured correctly."))
+        persist_session(request)
+        return _no_store(redirect(reverse("control:auth.login")))
+    return _no_store(redirect(auth_backend.authorize_redirect_url(request)))
+
+
+@never_cache
 def oidc_callback(request):
+    code = request.GET.get("code")
+    replay = get_code_replay(request, code)
+    if replay:
+        if replay.get("status") == "pending":
+            return _redirect_retryable_error(request, "failed")
+        return _redirect_for_replay(request, replay)
+
     auth_backend = OIDCAuthBackend()
     user_data, id_token, userinfo = auth_backend.process_callback(request)
+    if getattr(request, "oidc_code_inflight", False):
+        return _redirect_retryable_error(request, "failed")
     callback_meta = request.session.pop("oidc_callback_meta", {}) or {}
     purpose = callback_meta.get("purpose", "login")
 
     if user_data is None:
-        return _redirect_to_native_login(
-            request,
-            _oidc_callback_error_message(request),
-        )
+        replay = get_code_replay(request, code)
+        if replay and replay.get("status") not in (None, "pending"):
+            return _redirect_for_replay(request, replay)
+        reason = request.session.pop("oidc_callback_error", None) or "failed"
+        if code:
+            store_code_replay(request, code, status="error", reason=reason)
+        return _redirect_retryable_error(request, reason)
 
     verification_error = ensure_email_verified(user_data)
     if verification_error:
         return _redirect_to_native_login(request, verification_error)
 
     if purpose == "link":
-        return _oidc_callback_profile_link(
+        response = _oidc_callback_profile_link(
             request, user_data, id_token, userinfo, callback_meta
         )
+        _remember_redirect_replay(request, response)
+        return _no_store(response)
 
     converted_user = find_converted_native_user(user_data["uuid"])
     if converted_user:
@@ -224,7 +321,8 @@ def oidc_callback(request):
         request, user_data, id_token, userinfo
     )
     if collision_response is not None:
-        return collision_response
+        _remember_redirect_replay(request, collision_response)
+        return _no_store(collision_response)
 
     try:
         with scopes_disabled():
@@ -372,17 +470,18 @@ class OIDCLinkAccountView(LoginRequiredMixin, TemplateView):
 
 
 class OIDCLinkStartView(LoginRequiredMixin, RecentAuthenticationRequiredMixin, View):
+    @method_decorator(never_cache)
     def get(self, request, *args, **kwargs):
         if not allow_account_linking():
             messages.error(request, _("Account linking is disabled."))
-            return redirect(reverse("plugins:pretix_oidc:oidc_link_account"))
+            return _no_store(redirect(reverse("plugins:pretix_oidc:oidc_link_account")))
 
         if request.user.auth_backend != "native":
             messages.error(
                 request,
                 _("Your account is already linked to an external login method."),
             )
-            return redirect(reverse("plugins:pretix_oidc:oidc_link_account"))
+            return _no_store(redirect(reverse("plugins:pretix_oidc:oidc_link_account")))
 
         auth_backend = OIDCAuthBackend()
         if not getattr(auth_backend, "client", None):
@@ -390,12 +489,12 @@ class OIDCLinkStartView(LoginRequiredMixin, RecentAuthenticationRequiredMixin, V
                 request,
                 _("OpenID Connect is not configured correctly."),
             )
-            return redirect(reverse("plugins:pretix_oidc:oidc_link_account"))
+            return _no_store(redirect(reverse("plugins:pretix_oidc:oidc_link_account")))
 
-        url = auth_backend.authentication_url(
+        url = auth_backend.authorize_redirect_url(
             request, purpose="link", link_user_id=request.user.pk
         )
-        return redirect(url)
+        return _no_store(redirect(url))
 
 
 # These views have been adapted from pretix-cas plugin (https://github.com/DataManagementLab/pretix-cas)
