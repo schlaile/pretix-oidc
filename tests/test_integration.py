@@ -120,8 +120,10 @@ def test_assignment_rules_list_includes_organizer_nav(organizer_a, team_a):
 def test_assignment_rules_list_denied_for_non_staff(organizer_a, team_a):
     with scopes_disabled():
         user = User.objects.create_user("user@example.com", "password")
-        team_a.can_change_organizer_settings = True
-        team_a.save(update_fields=["can_change_organizer_settings"])
+        # pretix 2026.x: legacy can_* team flags were replaced by
+        # all_organizer_permissions / limit_organizer_permissions.
+        team_a.all_organizer_permissions = True
+        team_a.save(update_fields=["all_organizer_permissions"])
         team_a.members.add(user)
 
     factory = RequestFactory()

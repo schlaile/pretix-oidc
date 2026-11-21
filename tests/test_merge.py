@@ -1,6 +1,6 @@
 import pytest
 from datetime import timedelta
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 from django.utils.timezone import now
 from django_otp.plugins.otp_static.models import StaticDevice
 from django_otp.plugins.otp_totp.models import TOTPDevice
@@ -92,6 +92,14 @@ class _SessionStore(dict):
     def save(self):
         raise AssertionError("session.save() must not be called during login URL build")
 
+    # Used by django.contrib.auth.login(): a flush would drop the 2FA keys,
+    # cycling the key keeps them (as with a real session backend).
+    def flush(self):
+        self.clear()
+
+    def cycle_key(self):
+        pass
+
 
 @pytest.mark.django_db
 def test_merge_oidc_user_into_native_success(
@@ -174,7 +182,10 @@ def test_merge_rejects_oidc_without_email(staff_user, native_user, oidc_user):
 @pytest.mark.django_db
 def test_merge_rejects_conflicting_email(staff_user, native_user, oidc_user):
     with scopes_disabled():
-        User.objects.create_user("other@example.com", "password")
+        # User.email is unique and lowercased on save, so a conflicting
+        # account can only be a legacy row differing in case.
+        other = User.objects.create_user("legacy@example.com", "password")
+        User.objects.filter(pk=other.pk).update(email="Other@Example.com")
         oidc_user.email = "other@example.com"
         oidc_user.save()
 
@@ -224,8 +235,9 @@ def test_handle_login_source_after_merge(staff_user, native_user, oidc_user):
     with scopes_disabled():
         oidc_user.auth_backend_identifier = "sub-2fa-login"
         oidc_user.save()
-        _login_source(native_user)
-        _login_source(oidc_user)
+        # Without GeoIP, pretix stores country=None for the new login.
+        _login_source(native_user, country=None)
+        _login_source(oidc_user, country=None)
 
     _merge(native_user, oidc_user, staff_user)
 
@@ -247,6 +259,12 @@ def test_handle_login_source_after_merge(staff_user, native_user, oidc_user):
 
 
 @pytest.mark.django_db
+@override_settings(
+    PRETIX_AUTH_BACKENDS=[
+        "pretix.base.auth.NativeAuthBackend",
+        "pretix_oidc.auth.OIDCAuthBackend",
+    ]
+)
 def test_oidc_login_clears_stale_session_before_2fa(staff_user, native_user, oidc_user):
     from django.contrib.auth import SESSION_KEY, login as auth_login
 
@@ -286,7 +304,19 @@ def test_oidc_login_clears_stale_session_before_2fa(staff_user, native_user, oid
     assert request.session["pretix_auth_2fa_user"] == native_user.pk
 
 
+def _login_source_is_unique():
+    return any(
+        set(u) >= {"user", "agent_type", "device_type", "os_type", "country"}
+        for u in UserKnownLoginSource._meta.unique_together
+    )
+
+
 @pytest.mark.django_db
+@pytest.mark.skipif(
+    _login_source_is_unique(),
+    reason="pretix enforces unique login sources (migration 0278), "
+    "duplicates cannot exist",
+)
 def test_dedupe_login_sources_repairs_existing_duplicates(native_user):
     with scopes_disabled():
         _login_source(native_user)
